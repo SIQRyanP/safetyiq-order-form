@@ -1,5 +1,7 @@
 import { useState, useRef } from "react";
-
+import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, Header, Footer, AlignmentType, BorderStyle, WidthType, ShadingType, HeadingLevel, PageNumber, PageBreak } from "docx";
+import { saveAs } from "file-saver";
+ 
 /* ─── Data ─── */
 const PRODUCTS = {
   safetyIndicators: {
@@ -41,41 +43,28 @@ const PRODUCTS = {
     ],
   },
 };
-
+ 
 const TERMS = [
   { id: 36, label: "36 Months" },
   { id: 60, label: "60 Months" },
 ];
-
-const TIERS = [
-  { id: "standard", label: "Standard", multiplier: 1.0 },
-  { id: "professional", label: "Professional", multiplier: 1.3 },
-  { id: "enterprise", label: "Enterprise", multiplier: 1.6 },
-];
-
+ 
 function fmt(n) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 function fmtWhole(n) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
 }
-function pct(n) { return `${(n * 100).toFixed(1)}%`; }
-
+ 
 function daysBetween(a, b) {
   const d1 = new Date(a + "T00:00:00"), d2 = new Date(b + "T00:00:00");
   return Math.round((d2 - d1) / 86400000);
 }
-
-/* Given a start date, find the next annual renewal date (same month/day, next year) */
-function nextAnniversary(startDateStr) {
-  const d = new Date(startDateStr + "T00:00:00");
-  return new Date(d.getFullYear() + 1, d.getMonth(), d.getDate());
-}
-
+ 
 function dateStr(d) {
   return d.toISOString().split("T")[0];
 }
-
+ 
 function CheckIcon() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
@@ -94,7 +83,7 @@ function DocIcon() {
 function InfoIcon() {
   return <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 6.5V10M7 4.5V5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
 }
-
+ 
 const cardStyle = { background: "rgba(15,25,45,0.6)", border: "1px solid #1a2540", borderRadius: 14, padding: 24, marginBottom: 16 };
 const inputStyle = {
   width: "100%", boxSizing: "border-box", padding: "11px 14px", borderRadius: 8,
@@ -108,29 +97,249 @@ const btnPrimary = {
   fontWeight: 700, fontSize: 15, cursor: "pointer", boxShadow: "0 4px 20px rgba(37,99,235,0.3)",
 };
 const btnBack = { padding: "14px 28px", borderRadius: 10, border: "1px solid #263352", background: "transparent", color: "#8ea4c8", fontWeight: 600, fontSize: 14, cursor: "pointer" };
-
+ 
+/* ─── DOCX Generation ─── */
+function buildOrderDocx({ customer, term, termMonths, moduleItems, customItemsCalc, moduleSubtotal, customSubtotal, annualTotal, monthlyTotal, totalContractValue, prorationCalc, existingARR, newServiceStart, annualRenewalDate, existingContractEnd, annualEscalator }) {
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const border = { style: BorderStyle.SINGLE, size: 1, color: "B0B0B0" };
+  const borders = { top: border, bottom: border, left: border, right: border };
+  const cellMargins = { top: 60, bottom: 60, left: 100, right: 100 };
+  const headerShading = { fill: "1a2540", type: ShadingType.CLEAR };
+  const altShading = { fill: "F5F7FA", type: ShadingType.CLEAR };
+ 
+  const tableWidth = 9360;
+ 
+  const allItems = [
+    ...moduleItems.map(m => ({ ...m, type: "module" })),
+    ...customItemsCalc.map(c => ({ ...c, type: "custom" })),
+  ];
+ 
+  // Line items table
+  const colWidths = [3200, 2400, 1000, 1000, 1760];
+  const headerRow = new TableRow({
+    children: ["Item", "Description", "List Price", "Disc %", "Net Annual"].map((text, i) => (
+      new TableCell({
+        borders,
+        width: { size: colWidths[i], type: WidthType.DXA },
+        shading: headerShading,
+        margins: cellMargins,
+        children: [new Paragraph({ children: [new TextRun({ text, bold: true, color: "FFFFFF", font: "Arial", size: 20 })] })],
+      })
+    )),
+  });
+ 
+  const itemRows = allItems.map((item, idx) => {
+    const shading = idx % 2 === 1 ? altShading : undefined;
+    return new TableRow({
+      children: [
+        new TableCell({ borders, width: { size: colWidths[0], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ children: [new TextRun({ text: item.name, font: "Arial", size: 20, bold: true })] })] }),
+        new TableCell({ borders, width: { size: colWidths[1], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ children: [new TextRun({ text: item.desc || "", font: "Arial", size: 18, color: "555555" })] })] }),
+        new TableCell({ borders, width: { size: colWidths[2], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: fmt(item.listPrice), font: "Arial", size: 20 })] })] }),
+        new TableCell({ borders, width: { size: colWidths[3], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: item.discount > 0 ? `${item.discount}%` : "\u2014", font: "Arial", size: 20, color: item.discount > 0 ? "E53E3E" : "999999" })] })] }),
+        new TableCell({ borders, width: { size: colWidths[4], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: fmt(item.netPrice), font: "Arial", size: 20, bold: true })] })] }),
+      ],
+    });
+  });
+ 
+  const totalRow = new TableRow({
+    children: [
+      new TableCell({ borders, width: { size: colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], type: WidthType.DXA }, columnSpan: 4, shading: { fill: "E8F5E9", type: ShadingType.CLEAR }, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: "Annual Total", font: "Arial", size: 22, bold: true })] })] }),
+      new TableCell({ borders, width: { size: colWidths[4], type: WidthType.DXA }, shading: { fill: "E8F5E9", type: ShadingType.CLEAR }, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: fmt(annualTotal), font: "Arial", size: 22, bold: true, color: "0D8050" })] })] }),
+    ],
+  });
+ 
+  const lineItemsTable = new Table({
+    width: { size: tableWidth, type: WidthType.DXA },
+    columnWidths: colWidths,
+    rows: [headerRow, ...itemRows, totalRow],
+  });
+ 
+  // Proration table
+  let prorationSection = [];
+  if (prorationCalc) {
+    const hasExisting = existingARR > 0;
+    const proCols = hasExisting ? [2400, 800, 2200, 2200, 1760] : [3200, 1000, 2800, 2360];
+    const proHeaders = hasExisting ? ["Period", "Days", "SafetyIQ Fee", "Existing Contract", "Total Due"] : ["Period", "Days", "SafetyIQ Fee", "Total Due"];
+ 
+    const proHeaderRow = new TableRow({
+      children: proHeaders.map((text, i) => (
+        new TableCell({
+          borders,
+          width: { size: proCols[i], type: WidthType.DXA },
+          shading: { fill: "78550A", type: ShadingType.CLEAR },
+          margins: cellMargins,
+          children: [new Paragraph({ alignment: i === 0 ? AlignmentType.LEFT : AlignmentType.RIGHT, children: [new TextRun({ text, bold: true, color: "FFFFFF", font: "Arial", size: 20 })] })],
+        })
+      )),
+    });
+ 
+    const proRows = prorationCalc.schedule.map((yr, idx) => {
+      const shading = idx % 2 === 1 ? { fill: "FFF8E1", type: ShadingType.CLEAR } : undefined;
+      const cells = [
+        new TableCell({ borders, width: { size: proCols[0], type: WidthType.DXA }, shading, margins: cellMargins, children: [
+          new Paragraph({ children: [new TextRun({ text: yr.label, font: "Arial", size: 20, bold: true })] }),
+          new Paragraph({ children: [new TextRun({ text: `${yr.periodStart} \u2192 ${yr.periodEnd}`, font: "Arial", size: 16, color: "888888" })] }),
+        ] }),
+        new TableCell({ borders, width: { size: proCols[1], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: String(yr.days), font: "Arial", size: 20 })] })] }),
+        new TableCell({ borders, width: { size: proCols[2], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: fmt(yr.safetyIQFee), font: "Arial", size: 20 })] })] }),
+      ];
+      if (hasExisting) {
+        cells.push(new TableCell({ borders, width: { size: proCols[3], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: yr.existingFee > 0 ? fmt(yr.existingFee) : "\u2014", font: "Arial", size: 20 })] })] }));
+      }
+      cells.push(new TableCell({ borders, width: { size: proCols[hasExisting ? 4 : 3], type: WidthType.DXA }, shading, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: fmt(yr.total), font: "Arial", size: 20, bold: true })] })] }));
+      return new TableRow({ children: cells });
+    });
+ 
+    const proTotalColSpan = hasExisting ? 4 : 3;
+    const proTotalRow = new TableRow({
+      children: [
+        new TableCell({ borders, width: { size: proCols.slice(0, proTotalColSpan).reduce((a, b) => a + b, 0), type: WidthType.DXA }, columnSpan: proTotalColSpan, shading: { fill: "FFF3CD", type: ShadingType.CLEAR }, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: "Total Contract Value", font: "Arial", size: 22, bold: true, color: "78550A" })] })] }),
+        new TableCell({ borders, width: { size: proCols[hasExisting ? 4 : 3], type: WidthType.DXA }, shading: { fill: "FFF3CD", type: ShadingType.CLEAR }, margins: cellMargins, children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: fmt(prorationCalc.totalAllYears), font: "Arial", size: 22, bold: true, color: "78550A" })] })] }),
+      ],
+    });
+ 
+    prorationSection = [
+      new Paragraph({ spacing: { before: 400 }, children: [] }),
+      new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Coterminus Payment Schedule", font: "Arial" })] }),
+      new Paragraph({ spacing: { after: 200 }, children: [new TextRun({ text: `New service start: ${newServiceStart} | Next annual renewal: ${annualRenewalDate} | Contract end: ${existingContractEnd} | Escalator: ${annualEscalator}%`, font: "Arial", size: 20, color: "666666" })] }),
+      new Table({ width: { size: tableWidth, type: WidthType.DXA }, columnWidths: proCols, rows: [proHeaderRow, ...proRows, proTotalRow] }),
+    ];
+  }
+ 
+  // Signature lines
+  const sigLine = new Paragraph({ spacing: { before: 60 }, children: [new TextRun({ text: "________________________________________", font: "Arial", size: 20, color: "999999" })] });
+ 
+  const doc = new Document({
+    styles: {
+      default: { document: { run: { font: "Arial", size: 22 } } },
+      paragraphStyles: [
+        { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true, run: { size: 32, bold: true, font: "Arial", color: "1a2540" }, paragraph: { spacing: { before: 300, after: 200 }, outlineLevel: 0 } },
+        { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true, run: { size: 26, bold: true, font: "Arial", color: "1a2540" }, paragraph: { spacing: { before: 240, after: 160 }, outlineLevel: 1 } },
+      ],
+    },
+    sections: [{
+      properties: {
+        page: {
+          size: { width: 12240, height: 15840 },
+          margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+        },
+      },
+      headers: {
+        default: new Header({
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.LEFT,
+              spacing: { after: 100 },
+              border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "2563EB", space: 1 } },
+              children: [
+                new TextRun({ text: "SafetyIQ, Inc.", font: "Arial", size: 24, bold: true, color: "1a2540" }),
+                new TextRun({ text: "  \u2014  SaaS Software Order Form", font: "Arial", size: 20, color: "666666" }),
+              ],
+            }),
+          ],
+        }),
+      },
+      footers: {
+        default: new Footer({
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              border: { top: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC", space: 1 } },
+              spacing: { before: 100 },
+              children: [
+                new TextRun({ text: "Confidential \u2014 SafetyIQ, Inc.  |  Page ", font: "Arial", size: 18, color: "999999" }),
+                new TextRun({ children: [PageNumber.CURRENT], font: "Arial", size: 18, color: "999999" }),
+              ],
+            }),
+          ],
+        }),
+      },
+      children: [
+        // Title
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 }, children: [new TextRun({ text: "SaaS Software Order Form", font: "Arial", size: 36, bold: true, color: "1a2540" })] }),
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [new TextRun({ text: `Date: ${today}`, font: "Arial", size: 22, color: "666666" })] }),
+ 
+        // Customer Info
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Customer Information", font: "Arial" })] }),
+        new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Company: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: customer.company || "\u2014", font: "Arial", size: 22 })] }),
+        new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Contact: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: customer.contact || "\u2014", font: "Arial", size: 22 })] }),
+        new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Email: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: customer.email || "\u2014", font: "Arial", size: 22 })] }),
+        ...(customer.phone ? [new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Phone: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: customer.phone, font: "Arial", size: 22 })] })] : []),
+        ...((customer.city || customer.state) ? [new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Address: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: [customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", "), font: "Arial", size: 22 })] })] : []),
+        ...(customer.employees ? [new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Employees: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: customer.employees, font: "Arial", size: 22 })] })] : []),
+ 
+        // Plan Config
+        new Paragraph({ spacing: { before: 300 }, children: [] }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Plan Configuration", font: "Arial" })] }),
+        new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Contract Term: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: TERMS.find(t => t.id === term)?.label || "", font: "Arial", size: 22 })] }),
+ 
+        // Line Items
+        new Paragraph({ spacing: { before: 300 }, children: [] }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Line Items", font: "Arial" })] }),
+        lineItemsTable,
+ 
+        // Pricing Summary
+        new Paragraph({ spacing: { before: 400 }, children: [] }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Pricing Summary", font: "Arial" })] }),
+        new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Annual Recurring Revenue (ARR): ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: fmt(annualTotal), font: "Arial", size: 22, bold: true, color: "0D8050" })] }),
+        new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "Monthly: ", bold: true, font: "Arial", size: 22 }), new TextRun({ text: fmt(monthlyTotal), font: "Arial", size: 22 })] }),
+        new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: `Total Contract Value (${termMonths / 12}yr): `, bold: true, font: "Arial", size: 22 }), new TextRun({ text: fmt(totalContractValue), font: "Arial", size: 22 })] }),
+        ...(prorationCalc ? [new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: `Year 1 Prorated (${prorationCalc.daysToRenewal} days): `, bold: true, font: "Arial", size: 22, color: "78550A" }), new TextRun({ text: fmt(prorationCalc.year1Prorated), font: "Arial", size: 22, bold: true, color: "78550A" })] })] : []),
+ 
+        // Proration schedule
+        ...prorationSection,
+ 
+        // Notes
+        ...(customer.notes ? [
+          new Paragraph({ spacing: { before: 400 }, children: [] }),
+          new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Notes", font: "Arial" })] }),
+          new Paragraph({ children: [new TextRun({ text: customer.notes, font: "Arial", size: 22, color: "444444" })] }),
+        ] : []),
+ 
+        // Signatures
+        new Paragraph({ spacing: { before: 600 }, children: [] }),
+        new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: "Authorization & Signatures", font: "Arial" })] }),
+        new Paragraph({ spacing: { before: 100, after: 40 }, children: [new TextRun({ text: "By signing below, the parties agree to the terms outlined in this order form. Final pricing and terms are subject to the execution of a formal SaaS agreement.", font: "Arial", size: 20, italics: true, color: "666666" })] }),
+ 
+        // SafetyIQ signature
+        new Paragraph({ spacing: { before: 400 }, children: [new TextRun({ text: "SafetyIQ, Inc.", font: "Arial", size: 22, bold: true })] }),
+        sigLine,
+        new Paragraph({ spacing: { after: 20 }, children: [new TextRun({ text: "Gary Warzynski, Authorized Signatory", font: "Arial", size: 20, color: "444444" })] }),
+        new Paragraph({ children: [new TextRun({ text: "Date: ________________________", font: "Arial", size: 20, color: "999999" })] }),
+ 
+        // Customer signature
+        new Paragraph({ spacing: { before: 400 }, children: [new TextRun({ text: customer.company || "Customer", font: "Arial", size: 22, bold: true })] }),
+        sigLine,
+        new Paragraph({ spacing: { after: 20 }, children: [new TextRun({ text: `${customer.contact || "Authorized Representative"}, ${customer.company || "Customer"}`, font: "Arial", size: 20, color: "444444" })] }),
+        new Paragraph({ children: [new TextRun({ text: "Date: ________________________", font: "Arial", size: 20, color: "999999" })] }),
+      ],
+    }],
+  });
+ 
+  return doc;
+}
+ 
 export default function SafetyIQOrderForm() {
   const [step, setStep] = useState(0);
-  const [selectedModules, setSelectedModules] = useState({}); // id -> { ...mod, discount: 0 }
+  const [selectedModules, setSelectedModules] = useState({});
   const [customItems, setCustomItems] = useState({});
   const [term, setTerm] = useState(36);
-  const [tier, setTier] = useState("standard");
   const [expandedProduct, setExpandedProduct] = useState("safetyIndicators");
   const [customer, setCustomer] = useState({ company: "", contact: "", email: "", phone: "", employees: "", address: "", city: "", state: "", zip: "", notes: "" });
   const [submitted, setSubmitted] = useState(false);
   const [animIn, setAnimIn] = useState(true);
   const [generating, setGenerating] = useState(false);
-
+ 
   // Coterminus proration
   const [prorationEnabled, setProrationEnabled] = useState(false);
   const [newServiceStart, setNewServiceStart] = useState(() => new Date().toISOString().split("T")[0]);
-  const [annualRenewalDate, setAnnualRenewalDate] = useState(""); // existing contract's next annual fee due date (month-day cycle)
-  const [existingContractEnd, setExistingContractEnd] = useState(""); // end of the 36/60 month master term
-  const [existingARR, setExistingARR] = useState(0); // current contract's annual fee
-  const [annualEscalator, setAnnualEscalator] = useState(3); // % annual escalator on existing contract
-
+  const [annualRenewalDate, setAnnualRenewalDate] = useState("");
+  const [existingContractEnd, setExistingContractEnd] = useState("");
+  const [existingARR, setExistingARR] = useState(0);
+  const [annualEscalator, setAnnualEscalator] = useState(3);
+ 
   const topRef = useRef(null);
-
+ 
   /* ── Module selection with discount ── */
   const toggleModule = (id) => {
     setSelectedModules((prev) => {
@@ -145,14 +354,14 @@ export default function SafetyIQOrderForm() {
       return next;
     });
   };
-
+ 
   const setModuleDiscount = (id, disc) => {
     setSelectedModules((prev) => {
       if (!prev[id]) return prev;
       return { ...prev, [id]: { ...prev[id], discount: Math.min(100, Math.max(0, parseFloat(disc) || 0)) } };
     });
   };
-
+ 
   /* ── Custom line items ── */
   const addCustomItem = (prodKey) => {
     const id = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -174,162 +383,110 @@ export default function SafetyIQOrderForm() {
       return { ...prev, [prodKey]: arr };
     });
   };
-
+ 
   /* ── Calculations ── */
   const selectedCount = Object.keys(selectedModules).length;
   const allCustomItems = Object.values(customItems).flat().filter((c) => c.name && c.price > 0);
-  const tierMul = TIERS.find((t) => t.id === tier)?.multiplier || 1;
-
-  // Each module: (price × tierMul) × (1 - discount/100)
+ 
   const moduleItems = Object.values(selectedModules).map((m) => {
-    const listPrice = m.price * tierMul;
+    const listPrice = m.price;
     const netPrice = listPrice * (1 - m.discount / 100);
     return { ...m, listPrice, netPrice };
   });
   const moduleSubtotal = moduleItems.reduce((s, m) => s + m.netPrice, 0);
-
-  // Each custom item: price × (1 - discount/100), no tier multiplier
+ 
   const customItemsCalc = allCustomItems.map((c) => {
     const netPrice = c.price * (1 - c.discount / 100);
     return { ...c, listPrice: c.price, netPrice };
   });
   const customSubtotal = customItemsCalc.reduce((s, c) => s + c.netPrice, 0);
-
+ 
   const annualTotal = moduleSubtotal + customSubtotal;
   const monthlyTotal = annualTotal / 12;
   const termMonths = term;
   const termYears = termMonths / 12;
   const totalContractValue = annualTotal * termYears;
-
+ 
   /* ── Coterminus Proration ── */
-  /*
-    Scenario: Customer has an existing contract with an annual fee cycle.
-    New SafetyIQ services start mid-cycle. 
-    
-    Year 1 (prorated): From newServiceStart to the next annual renewal date,
-    we charge a prorated portion of the SafetyIQ ARR based on days remaining
-    in that annual period.
-    
-    Year 2+: Full SafetyIQ ARR + existing contract ARR × (1 + escalator)^year.
-    The contract runs until existingContractEnd (end of 36 or 60 month master term).
-  */
   let prorationCalc = null;
   if (prorationEnabled && newServiceStart && annualRenewalDate) {
-    const startD = new Date(newServiceStart + "T00:00:00");
-    const renewalD = new Date(annualRenewalDate + "T00:00:00");
-
-    // Days from service start to renewal date
     const daysToRenewal = daysBetween(newServiceStart, annualRenewalDate);
-
-    // Full annual period = 365 days
     const fullPeriod = 365;
-
-    // Proration factor for year 1
     const proFactor = daysToRenewal > 0 ? Math.min(1, daysToRenewal / fullPeriod) : 1;
     const year1Prorated = annualTotal * proFactor;
-
-    // Build year-by-year schedule
     const schedule = [];
     const contractEndD = existingContractEnd ? new Date(existingContractEnd + "T00:00:00") : null;
-
-    // Year 1: prorated
+ 
     schedule.push({
-      year: 1,
-      label: "Year 1 (Prorated)",
-      periodStart: newServiceStart,
-      periodEnd: annualRenewalDate,
-      days: Math.max(0, daysToRenewal),
-      safetyIQFee: year1Prorated,
-      existingFee: 0, // existing contract already paid for this period
-      total: year1Prorated,
-      isProrated: true,
+      year: 1, label: "Year 1 (Prorated)", periodStart: newServiceStart, periodEnd: annualRenewalDate,
+      days: Math.max(0, daysToRenewal), safetyIQFee: year1Prorated, existingFee: 0, total: year1Prorated, isProrated: true,
     });
-
-    // Subsequent years at full ARR + existing contract with escalator
+ 
     if (contractEndD) {
       let yearNum = 2;
-      let currentRenewal = new Date(renewalD);
-      const maxYears = Math.ceil(termMonths / 12) + 1; // safety cap
-
+      let currentRenewal = new Date(annualRenewalDate + "T00:00:00");
+      const maxYears = Math.ceil(termMonths / 12) + 1;
+ 
       while (yearNum <= maxYears) {
         const periodStart = new Date(currentRenewal);
         const nextRenewal = new Date(currentRenewal.getFullYear() + 1, currentRenewal.getMonth(), currentRenewal.getDate());
-
-        // If this period starts after contract end, stop
         if (periodStart >= contractEndD) break;
-
-        // If next renewal is past contract end, cap it
         const periodEnd = nextRenewal > contractEndD ? contractEndD : nextRenewal;
         const periodDays = daysBetween(dateStr(periodStart), dateStr(periodEnd));
-
-        // Is this a partial final year?
         const isPartial = periodDays < 365;
         const periodFactor = isPartial ? periodDays / 365 : 1;
-
-        // Existing contract fee with escalator: base × (1 + escalator%)^(year-1)
         const escalatedExisting = existingARR * Math.pow(1 + annualEscalator / 100, yearNum - 1);
         const existingFee = escalatedExisting * periodFactor;
         const siqFee = annualTotal * periodFactor;
-
+ 
         schedule.push({
-          year: yearNum,
-          label: isPartial ? `Year ${yearNum} (Partial)` : `Year ${yearNum}`,
-          periodStart: dateStr(periodStart),
-          periodEnd: dateStr(periodEnd),
-          days: periodDays,
-          safetyIQFee: siqFee,
-          existingFee: existingARR > 0 ? existingFee : 0,
-          total: siqFee + (existingARR > 0 ? existingFee : 0),
-          isProrated: isPartial,
+          year: yearNum, label: isPartial ? `Year ${yearNum} (Partial)` : `Year ${yearNum}`,
+          periodStart: dateStr(periodStart), periodEnd: dateStr(periodEnd), days: periodDays,
+          safetyIQFee: siqFee, existingFee: existingARR > 0 ? existingFee : 0,
+          total: siqFee + (existingARR > 0 ? existingFee : 0), isProrated: isPartial,
         });
-
         currentRenewal = nextRenewal;
         yearNum++;
       }
     }
-
+ 
     const totalAllYears = schedule.reduce((s, y) => s + y.total, 0);
-
     prorationCalc = { proFactor, year1Prorated, schedule, totalAllYears, daysToRenewal, fullPeriod };
   }
-
+ 
   const hasItems = selectedCount > 0 || allCustomItems.length > 0;
-
+ 
   const goStep = (s) => {
     setAnimIn(false);
     setTimeout(() => { setStep(s); setAnimIn(true); }, 220);
     topRef.current?.scrollIntoView({ behavior: "smooth" });
   };
-
+ 
   const handleSubmit = () => {
     setAnimIn(false);
     setTimeout(() => { setSubmitted(true); setAnimIn(true); }, 220);
   };
-
-  const generateDocx = () => {
+ 
+  const generateDocx = async () => {
     setGenerating(true);
-    const allItems = [
-      ...moduleItems.map(m => ({ name: m.name, desc: m.desc, listPrice: m.listPrice, discount: m.discount, netPrice: m.netPrice, type: "module" })),
-      ...customItemsCalc.map(c => ({ name: c.name, desc: c.desc || "Custom line item", listPrice: c.listPrice, discount: c.discount, netPrice: c.netPrice, type: "custom" })),
-    ];
-    const orderData = {
-      customer, tier: TIERS.find(t => t.id === tier)?.label, tierMul,
-      term: TERMS.find(t => t.id === term)?.label, termMonths: term,
-      items: allItems, moduleSubtotal, customSubtotal, annualTotal, monthlyTotal, totalContractValue,
-      proration: prorationCalc ? {
-        enabled: true, newServiceStart, annualRenewalDate, existingContractEnd,
-        existingARR, annualEscalator, schedule: prorationCalc.schedule,
-        totalAllYears: prorationCalc.totalAllYears,
-        year1Prorated: prorationCalc.year1Prorated,
-        daysToRenewal: prorationCalc.daysToRenewal,
-      } : null,
-    };
-    sendPrompt(`Please generate a professional Word document (.docx) for this SafetyIQ order form. Use the docx npm package with proper table formatting, signature lines, and professional styling.\n\nORDER DATA:\n${JSON.stringify(orderData, null, 2)}\n\nRequirements:\n- US Letter page, Arial font\n- Header: "SafetyIQ, Inc. — SaaS Software Order Form" with date\n- Customer info section\n- Line items table with columns: Item, Description, List Price, Discount, Net Annual Fee\n- Plan config (tier, term)\n- Pricing summary with all totals${prorationCalc ? "\n- Coterminus proration schedule table showing each year: Period, Days, SafetyIQ Fee, Existing Contract Fee (with escalator), Total" : ""}\n- Signature lines for Gary Warzynski (SafetyIQ authorized signatory) and customer (${customer.company || "Customer"})\n- Footer: "Confidential — SafetyIQ, Inc." with page numbers\n- Save and present the file`);
-    setTimeout(() => setGenerating(false), 1000);
+    try {
+      const doc = buildOrderDocx({
+        customer, term, termMonths, moduleItems, customItemsCalc, moduleSubtotal, customSubtotal,
+        annualTotal, monthlyTotal, totalContractValue, prorationCalc, existingARR, newServiceStart,
+        annualRenewalDate, existingContractEnd, annualEscalator,
+      });
+      const buffer = await Packer.toBlob(doc);
+      const filename = `SafetyIQ_Order_${customer.company ? customer.company.replace(/[^a-zA-Z0-9]/g, "_") : "Form"}_${new Date().toISOString().split("T")[0]}.docx`;
+      saveAs(buffer, filename);
+    } catch (err) {
+      console.error("Error generating document:", err);
+      alert("There was an error generating the document. Please try again.");
+    }
+    setGenerating(false);
   };
-
+ 
   const stepTitles = ["Select Modules", "Configure Plan", "Customer Details", "Review & Submit"];
-
+ 
   /* ── Discount input (inline) ── */
   const DiscountBadge = ({ value, onChange }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
@@ -351,7 +508,7 @@ export default function SafetyIQOrderForm() {
       </div>
     </div>
   );
-
+ 
   return (
     <div style={{
       minHeight: "100vh",
@@ -362,9 +519,9 @@ export default function SafetyIQOrderForm() {
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet" />
       <div style={{ position: "fixed", top: "-20%", right: "-10%", width: "50vw", height: "50vw", background: "radial-gradient(circle, rgba(37,99,235,0.08) 0%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
       <div style={{ position: "fixed", bottom: "-15%", left: "-10%", width: "40vw", height: "40vw", background: "radial-gradient(circle, rgba(14,165,120,0.06) 0%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
-
+ 
       <div ref={topRef} style={{ maxWidth: 960, margin: "0 auto", padding: "32px 20px 60px", position: "relative", zIndex: 1 }}>
-
+ 
         {/* Header */}
         <div style={{ textAlign: "center", marginBottom: 36 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
@@ -373,7 +530,7 @@ export default function SafetyIQOrderForm() {
           </div>
           <p style={{ fontSize: 13, color: "#6b7fa3", letterSpacing: 2, textTransform: "uppercase", margin: 0 }}>SaaS Software Order Form</p>
         </div>
-
+ 
         {/* Progress */}
         {!submitted && (
           <div style={{ display: "flex", justifyContent: "center", gap: 0, marginBottom: 40, position: "relative" }}>
@@ -395,9 +552,9 @@ export default function SafetyIQOrderForm() {
             ))}
           </div>
         )}
-
+ 
         <div style={{ opacity: animIn ? 1 : 0, transform: animIn ? "translateY(0)" : "translateY(12px)", transition: "all 0.25s ease" }}>
-
+ 
           {/* ═══ SUBMITTED ═══ */}
           {submitted ? (
             <div style={{ textAlign: "center", padding: "50px 20px" }}>
@@ -415,7 +572,7 @@ export default function SafetyIQOrderForm() {
                   </p>
                 )}
                 <p style={{ margin: "4px 0 0", fontSize: 13, color: "#8ea4c8" }}>
-                  {selectedCount + allCustomItems.length} item{(selectedCount + allCustomItems.length) !== 1 ? "s" : ""} · {TIERS.find(t => t.id === tier)?.label} · {TERMS.find(t => t.id === term)?.label}
+                  {selectedCount + allCustomItems.length} item{(selectedCount + allCustomItems.length) !== 1 ? "s" : ""} · {TERMS.find(t => t.id === term)?.label}
                 </p>
               </div>
               <div style={{ marginTop: 28, display: "flex", justifyContent: "center", gap: 12 }}>
@@ -425,13 +582,13 @@ export default function SafetyIQOrderForm() {
               </div>
               <p style={{ fontSize: 13, color: "#4a5a68", marginTop: 20 }}>Questions? Contact <span style={{ color: "#8ea4c8" }}>ryan.pollard@safetyiq.com</span></p>
             </div>
-
+ 
           /* ═══ STEP 0: MODULES ═══ */
           ) : step === 0 ? (
             <div>
               <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 26, color: "#f0f4fa", margin: "0 0 6px", textAlign: "center" }}>Choose Your Modules</h2>
               <p style={{ textAlign: "center", color: "#6b7fa3", margin: "0 0 28px", fontSize: 14 }}>Select modules, set per-item discounts, and add custom line items</p>
-
+ 
               {Object.entries(PRODUCTS).map(([key, prod]) => {
                 const isOpen = expandedProduct === key;
                 const prodSelectedCount = prod.modules.filter(m => selectedModules[m.id]).length;
@@ -459,7 +616,7 @@ export default function SafetyIQOrderForm() {
                           {prod.modules.map((mod) => {
                             const sel = !!selectedModules[mod.id];
                             const disc = sel ? selectedModules[mod.id].discount : 0;
-                            const listPrice = mod.price * tierMul;
+                            const listPrice = mod.price;
                             const netPrice = listPrice * (1 - disc / 100);
                             return (
                               <div key={mod.id} style={{
@@ -543,37 +700,20 @@ export default function SafetyIQOrderForm() {
                   </div>
                 );
               })}
-
+ 
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
                 <button onClick={() => hasItems && goStep(1)} disabled={!hasItems} style={{ ...btnPrimary, opacity: hasItems ? 1 : 0.4, cursor: hasItems ? "pointer" : "not-allowed" }}>
                   Continue — {selectedCount + allCustomItems.length} item{(selectedCount + allCustomItems.length) !== 1 ? "s" : ""}
                 </button>
               </div>
             </div>
-
+ 
           /* ═══ STEP 1: CONFIGURE ═══ */
           ) : step === 1 ? (
             <div>
               <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 26, color: "#f0f4fa", margin: "0 0 6px", textAlign: "center" }}>Configure Your Plan</h2>
-              <p style={{ textAlign: "center", color: "#6b7fa3", margin: "0 0 28px", fontSize: 14 }}>Set tier, contract term, and coterminus proration</p>
-
-              {/* Tier */}
-              <div style={cardStyle}>
-                <h3 style={{ fontSize: 13, color: "#8ea4c8", margin: "0 0 14px", textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 600 }}>Service Tier</h3>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                  {TIERS.map((t) => (
-                    <div key={t.id} onClick={() => setTier(t.id)} style={{
-                      padding: "16px 14px", borderRadius: 10, cursor: "pointer", textAlign: "center",
-                      background: tier === t.id ? "rgba(37,99,235,0.1)" : "rgba(20,30,55,0.5)",
-                      border: `2px solid ${tier === t.id ? "#2563eb" : "#1a2540"}`, transition: "all 0.2s",
-                    }}>
-                      <div style={{ fontWeight: 700, fontSize: 15, color: tier === t.id ? "#f0f4fa" : "#6b7fa3" }}>{t.label}</div>
-                      <div style={{ fontSize: 12, color: "#506480", marginTop: 4 }}>{t.multiplier === 1 ? "Base pricing" : `${Math.round((t.multiplier - 1) * 100)}% premium`}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
+              <p style={{ textAlign: "center", color: "#6b7fa3", margin: "0 0 28px", fontSize: 14 }}>Set contract term and coterminus proration</p>
+ 
               {/* Term */}
               <div style={cardStyle}>
                 <h3 style={{ fontSize: 13, color: "#8ea4c8", margin: "0 0 14px", textTransform: "uppercase", letterSpacing: 1.5, fontWeight: 600 }}>Contract Term</h3>
@@ -590,7 +730,7 @@ export default function SafetyIQOrderForm() {
                   ))}
                 </div>
               </div>
-
+ 
               {/* Coterminus Proration */}
               <div style={{ ...cardStyle, borderColor: prorationEnabled ? "rgba(251,191,36,0.3)" : "#1a2540" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: prorationEnabled ? 18 : 0 }}>
@@ -647,7 +787,7 @@ export default function SafetyIQOrderForm() {
                         <span style={{ fontSize: 11, color: "#506480", marginTop: 4, display: "block" }}>Applied to existing contract each year</span>
                       </div>
                     </div>
-
+ 
                     {/* Proration Preview */}
                     {prorationCalc && (
                       <div style={{ marginTop: 20, background: "rgba(251,191,36,0.06)", borderRadius: 10, padding: "16px 18px", border: "1px solid rgba(251,191,36,0.15)" }}>
@@ -690,7 +830,7 @@ export default function SafetyIQOrderForm() {
                   </div>
                 )}
               </div>
-
+ 
               {/* Pricing summary */}
               <div style={{ background: "linear-gradient(135deg, rgba(37,99,235,0.08), rgba(14,165,120,0.06))", border: "1px solid rgba(37,99,235,0.2)", borderRadius: 14, padding: 24 }}>
                 {moduleItems.filter(m => m.discount > 0).length > 0 && (
@@ -737,13 +877,13 @@ export default function SafetyIQOrderForm() {
                   )}
                 </div>
               </div>
-
+ 
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
                 <button onClick={() => goStep(0)} style={btnBack}>Back</button>
                 <button onClick={() => goStep(2)} style={btnPrimary}>Continue</button>
               </div>
             </div>
-
+ 
           /* ═══ STEP 2: CUSTOMER ═══ */
           ) : step === 2 ? (
             <div>
@@ -780,13 +920,13 @@ export default function SafetyIQOrderForm() {
                   style={{ ...btnPrimary, opacity: customer.company && customer.contact && customer.email ? 1 : 0.4, cursor: customer.company && customer.contact && customer.email ? "pointer" : "not-allowed" }}>Continue</button>
               </div>
             </div>
-
+ 
           /* ═══ STEP 3: REVIEW ═══ */
           ) : (
             <div>
               <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 26, color: "#f0f4fa", margin: "0 0 6px", textAlign: "center" }}>Review Your Order</h2>
               <p style={{ textAlign: "center", color: "#6b7fa3", margin: "0 0 28px", fontSize: 14 }}>Verify all details before submitting</p>
-
+ 
               {/* Customer */}
               <div style={cardStyle}>
                 <h3 style={{ fontSize: 13, color: "#6b7fa3", textTransform: "uppercase", letterSpacing: 1.5, margin: "0 0 12px", fontWeight: 600 }}>Customer</h3>
@@ -796,7 +936,7 @@ export default function SafetyIQOrderForm() {
                 {(customer.city || customer.state) && <div style={{ fontSize: 13, color: "#6b7fa3", marginTop: 2 }}>{[customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", ")}</div>}
                 {customer.employees && <div style={{ fontSize: 13, color: "#6b7fa3", marginTop: 2 }}>{customer.employees} employees</div>}
               </div>
-
+ 
               {/* Line items table */}
               <div style={cardStyle}>
                 <h3 style={{ fontSize: 13, color: "#6b7fa3", textTransform: "uppercase", letterSpacing: 1.5, margin: "0 0 12px", fontWeight: 600 }}>Line Items</h3>
@@ -840,18 +980,15 @@ export default function SafetyIQOrderForm() {
                   </table>
                 </div>
               </div>
-
+ 
               {/* Plan */}
               <div style={cardStyle}>
                 <h3 style={{ fontSize: 13, color: "#6b7fa3", textTransform: "uppercase", letterSpacing: 1.5, margin: "0 0 12px", fontWeight: 600 }}>Plan Configuration</h3>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ color: "#6b7fa3" }}>Tier</span><span style={{ color: "#cfd8e8", fontWeight: 600 }}>{TIERS.find(t => t.id === tier)?.label} ({tierMul}x)</span>
-                </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#6b7fa3" }}>Term</span><span style={{ color: "#cfd8e8", fontWeight: 600 }}>{TERMS.find(t => t.id === term)?.label}</span>
                 </div>
               </div>
-
+ 
               {/* Proration schedule */}
               {prorationCalc && (
                 <div style={{ ...cardStyle, borderColor: "rgba(251,191,36,0.3)" }}>
@@ -891,7 +1028,7 @@ export default function SafetyIQOrderForm() {
                   </div>
                 </div>
               )}
-
+ 
               {/* Total */}
               <div style={{ background: "linear-gradient(135deg, rgba(37,99,235,0.1), rgba(14,165,120,0.08))", border: "1px solid rgba(37,99,235,0.25)", borderRadius: 14, padding: 24, textAlign: "center", marginBottom: 16 }}>
                 <div style={{ fontSize: 13, color: "#6b7fa3", marginBottom: 8 }}>SafetyIQ Annual Recurring Revenue</div>
@@ -903,14 +1040,14 @@ export default function SafetyIQOrderForm() {
                   </div>
                 )}
               </div>
-
+ 
               {customer.notes && (
                 <div style={cardStyle}>
                   <h3 style={{ fontSize: 13, color: "#6b7fa3", textTransform: "uppercase", letterSpacing: 1.5, margin: "0 0 8px", fontWeight: 600 }}>Notes</h3>
                   <p style={{ margin: 0, color: "#8ea4c8", fontSize: 14, lineHeight: 1.6 }}>{customer.notes}</p>
                 </div>
               )}
-
+ 
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24, flexWrap: "wrap", gap: 12 }}>
                 <button onClick={() => goStep(2)} style={btnBack}>Back</button>
                 <div style={{ display: "flex", gap: 12 }}>
@@ -927,7 +1064,7 @@ export default function SafetyIQOrderForm() {
             </div>
           )}
         </div>
-
+ 
         <div style={{ textAlign: "center", marginTop: 44, paddingTop: 20, borderTop: "1px solid #141e35" }}>
           <p style={{ fontSize: 12, color: "#2a3a58", margin: 0 }}>© {new Date().getFullYear()} SafetyIQ, Inc. · Confidential</p>
         </div>
@@ -935,3 +1072,4 @@ export default function SafetyIQOrderForm() {
     </div>
   );
 }
+ 

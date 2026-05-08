@@ -4,6 +4,8 @@
   "private": true,
   "description": "SafetyIQ SaaS Order Form — module selection, line-item discounts, coterminus proration, Word doc generation",
   "dependencies": {
+    "docx": "^9.6.1",
+    "file-saver": "^2.0.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"
