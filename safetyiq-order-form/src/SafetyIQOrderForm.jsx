@@ -607,8 +607,7 @@ export default function SafetyIQOrderForm() {
         }],
       });
 
-      const buffer = await Packer.toBuffer(doc);
-      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+      const blob = await Packer.toBlob(doc);
       const fileName = customer.company ? `SafetyIQ_Order_${customer.company.replace(/[^a-zA-Z0-9]/g, "_")}.docx` : "SafetyIQ_Order_Form.docx";
       saveAs(blob, fileName);
     } catch (err) {
