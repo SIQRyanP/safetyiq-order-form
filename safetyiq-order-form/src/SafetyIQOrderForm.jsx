@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useCallback } from "react";
 
 /* ══════════════════════════════════════════════════════════
    PRICING DATA
@@ -21,7 +21,6 @@ const BASE_PLATFORM_FEE = {
   t6: 28000, t7: 37000, t8: 44000, t9: 52000, t10: 60000,
 };
 
-/* ─── Safety Indicators Packages ─── */
 const PACKAGES = [
   {
     id: "launch", label: "Launch", tagline: "Essential Safety Management", color: "#2563eb",
@@ -40,7 +39,6 @@ const PACKAGES = [
   },
 ];
 
-/* ─── Safety Indicators Modules (à la carte) ─── */
 const SI_MODULES = [
   { id: "incidents", name: "Incident Management", desc: "Track, investigate, and analyze workplace incidents", prices: { t1: 3633, t2: 6812, t3: 11353, t4: 17260, t5: 24970, t6: 36320, t7: 47670, t8: 56750, t9: 68100, t10: 79450 } },
   { id: "audits", name: "Audits", desc: "Schedule and manage safety audits with automated scoring", prices: { t1: 2500, t2: 5000, t3: 8500, t4: 12920, t5: 18700, t6: 27200, t7: 35700, t8: 42500, t9: 51000, t10: 59500 } },
@@ -55,12 +53,6 @@ const SI_MODULES = [
   { id: "forms", name: "Forms", desc: "Configurable digital forms for field data collection", prices: { t1: 2000, t2: 4000, t3: 7000, t4: 10640, t5: 15400, t6: 22400, t7: 29400, t8: 35000, t9: 42000, t10: 49000 } },
 ];
 
-/* ─── DRUID Pricing ───
-   Reference list pricing starts at $10/user/month.
-   We apply same tier scale but start at $20/user/month.
-   Tiers (by # of users): 1-50, 51-100, 101-250, 251-1000, 1001-2000, 2001-3000, 3001-5000, 4000+
-   Price/user/month:      $20,  $18,    $16,     $14,       $12,       $10,       $8,        $6
-*/
 const DRUID_TIERS = [
   { id: "d1", label: "1–50 users", min: 1, max: 50, pricePerUserMonth: 20, pricePerUserAnnual: 240 },
   { id: "d2", label: "51–100 users", min: 51, max: 100, pricePerUserMonth: 18, pricePerUserAnnual: 216 },
@@ -80,29 +72,91 @@ function getDruidAnnual(users) {
   return tier.pricePerUserAnnual * Math.min(users, tier.max);
 }
 
-/* ─── JESI Pricing ───
-   Two line items that scale like the SI à la carte modules:
-   1. JESI Journey Management & Analytics (combined)
-   2. JESI w/ Health & Safety Companion App
-   Plus Lone Worker Suite as a separate line item
-*/
 const JESI_ITEMS = [
   { id: "jesi_jm", name: "JESI Journey Management & Analytics", desc: "Journey management with integrated analytics dashboard", prices: { t1: 2500, t2: 5000, t3: 9000, t4: 13680, t5: 19800, t6: 28800, t7: 37800, t8: 45000, t9: 54000, t10: 63000 } },
   { id: "jesi_lw", name: "JESI Lone Worker Suite", desc: "Real-time lone worker monitoring, check-ins, and alerts", prices: { t1: 3000, t2: 6000, t3: 10500, t4: 15960, t5: 23100, t6: 33600, t7: 44100, t8: 52500, t9: 63000, t10: 73500 } },
   { id: "jesi_hs", name: "JESI w/ Health & Safety Companion App", desc: "Full JESI platform with mobile H&S companion for field teams", prices: { t1: 2500, t2: 5000, t3: 9000, t4: 13680, t5: 19800, t6: 28800, t7: 37800, t8: 45000, t9: 54000, t10: 63000 } },
 ];
 
-/* ══════════════════════════════════════════════════════════
-   HELPERS
-   ══════════════════════════════════════════════════════════ */
 const fmt = (n) => n == null ? "Custom" : "$" + n.toLocaleString("en-US");
 const fmtM = (n) => n == null ? "Custom" : "$" + Math.round(n / 12).toLocaleString("en-US") + "/mo";
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 /* ══════════════════════════════════════════════════════════
-   LOGO (base64 embedded – loaded at runtime from file input)
+   THEME (outside component — stable references)
    ══════════════════════════════════════════════════════════ */
-const LOGO_PLACEHOLDER = null; // Will be set from uploaded file or embedded
+const T = {
+  bg: "#060b16", card: "#0d1526", cardBorder: "#1a2540",
+  accent: "#2563eb", green: "#0ea578", gold: "#d97706",
+  textPrimary: "#e8ecf4", textSecondary: "#8ea4c8", textMuted: "#3a4a68",
+};
+const cardStyle = { background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: 14, padding: 24, marginBottom: 20 };
+const inputStyle = { width: "100%", padding: "10px 14px", borderRadius: 8, border: `1px solid ${T.cardBorder}`, background: "#0a1020", color: T.textPrimary, fontSize: 14, outline: "none", boxSizing: "border-box" };
+const labelStyle = { display: "block", fontSize: 12, color: T.textSecondary, marginBottom: 4, fontWeight: 500 };
+const btnPrimary = { padding: "14px 32px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${T.accent}, ${T.green})`, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", boxShadow: "0 4px 20px rgba(37,99,235,0.3)", transition: "transform 0.15s" };
+const btnSecondary = { padding: "10px 20px", borderRadius: 8, border: `1px solid ${T.cardBorder}`, background: "transparent", color: T.textSecondary, fontWeight: 600, fontSize: 13, cursor: "pointer" };
+const sectionTitle = { fontSize: 18, fontWeight: 700, color: T.textPrimary, marginBottom: 16 };
+const chipActive = (color) => ({ padding: "8px 16px", borderRadius: 8, border: `2px solid ${color}`, background: color + "18", color, fontWeight: 600, fontSize: 13, cursor: "pointer" });
+const chipInactive = { padding: "8px 16px", borderRadius: 8, border: `2px solid ${T.cardBorder}`, background: "transparent", color: T.textSecondary, fontWeight: 500, fontSize: 13, cursor: "pointer" };
+const discountInputStyle = { width: 56, padding: "4px 6px", borderRadius: 6, border: `1px solid ${T.cardBorder}`, background: "#0a1020", color: T.textPrimary, fontSize: 12, textAlign: "center" };
+
+const DocIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ marginRight: 6, verticalAlign: "middle" }}><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.5" fill="none"/><path d="M10 1v4h4" stroke="currentColor" strokeWidth="1.5"/></svg>;
+
+/* ══════════════════════════════════════════════════════════
+   EXTRACTED CHILD COMPONENTS
+   Defined OUTSIDE the main component so React keeps stable
+   identity across re-renders — fixes the focus-loss bug.
+   ══════════════════════════════════════════════════════════ */
+
+function DiscountInput({ value, onChange }) {
+  return (
+    <input type="number" min="0" max="100" placeholder="%"
+      value={value || ""}
+      onClick={e => e.stopPropagation()}
+      onChange={e => { e.stopPropagation(); onChange(Number(e.target.value) || 0); }}
+      style={discountInputStyle} />
+  );
+}
+
+function ModuleToggle({ mod, checked, price, disc, onToggle, onDiscChange, disabled, accentColor }) {
+  const finalPrice = Math.round(price * (1 - disc / 100));
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: `1px solid ${disabled ? T.textMuted : checked ? accentColor : T.cardBorder}`, background: disabled ? "#0a0f1a" : checked ? accentColor + "10" : "transparent", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer", marginBottom: 8, transition: "all 0.15s" }}
+      onClick={() => !disabled && onToggle()}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${checked ? accentColor : T.cardBorder}`, background: checked ? accentColor : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {checked && <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>✓</span>}
+        </div>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: disabled ? T.textMuted : T.textPrimary }}>{mod.name}</div>
+          <div style={{ fontSize: 11, color: T.textSecondary }}>{mod.desc}</div>
+        </div>
+      </div>
+      <div style={{ textAlign: "right" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: disabled ? T.textMuted : T.green }} onClick={onToggle}>{fmt(finalPrice)}<span style={{ fontSize: 10, fontWeight: 400 }}>/yr</span></div>
+        {!disabled && <DiscountInput value={disc} onChange={onDiscChange} />}
+      </div>
+    </div>
+  );
+}
+
+function CustomItemRow({ ci, onUpdate, onRemove, onDiscChange, discValue }) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, marginTop: 8 }}>
+      <input placeholder="Line item name" value={ci.name}
+        onChange={e => onUpdate(ci.uid, "name", e.target.value)}
+        style={{ ...inputStyle, flex: 2 }} />
+      <input placeholder="Description" value={ci.desc}
+        onChange={e => onUpdate(ci.uid, "desc", e.target.value)}
+        style={{ ...inputStyle, flex: 2 }} />
+      <input type="number" placeholder="Annual $" value={ci.price || ""}
+        onChange={e => onUpdate(ci.uid, "price", e.target.value)}
+        style={{ ...inputStyle, flex: 1 }} />
+      <DiscountInput value={discValue} onChange={onDiscChange} />
+      <button onClick={() => onRemove(ci.uid)} style={{ ...btnSecondary, padding: "6px 10px", color: "#ef4444", borderColor: "#ef4444" }}>✕</button>
+    </div>
+  );
+}
 
 /* ══════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -111,35 +165,28 @@ export default function SafetyIQOrderForm() {
   const [step, setStep] = useState(1);
   const [generating, setGenerating] = useState(false);
 
-  // ── Employee tier
   const [tier, setTier] = useState("t1");
 
-  // ── SI mode: "package" | "addon" | "alacarte"
-  const [siMode, setSiMode] = useState("package");
-  const [selectedPackage, setSelectedPackage] = useState("launch");
+  // SI mode: "none" | "package" | "addon" | "alacarte"
+  const [siMode, setSiMode] = useState("none");
+  const [selectedPackage, setSelectedPackage] = useState(null);
   const [selectedModules, setSelectedModules] = useState({});
   const [packageModuleOverrides, setPackageModuleOverrides] = useState({});
 
-  // ── DRUID
   const [druidEnabled, setDruidEnabled] = useState(false);
   const [druidUsers, setDruidUsers] = useState(50);
 
-  // ── JESI
   const [jesiSelections, setJesiSelections] = useState({ jesi_jm: false, jesi_lw: false, jesi_hs: false });
 
-  // ── Custom line items per product
   const [customItems, setCustomItems] = useState({ si: [], druid: [], jesi: [] });
 
-  // ── Contract & proration
   const [contractTerm, setContractTerm] = useState(36);
   const [existingContractEnd, setExistingContractEnd] = useState("");
   const [newStartDate, setNewStartDate] = useState("");
   const [escalator, setEscalator] = useState(3);
 
-  // ── Discounts
   const [lineDiscounts, setLineDiscounts] = useState({});
 
-  // ── Customer
   const [customer, setCustomer] = useState({
     company: "", address: "", city: "", state: "", zip: "", country: "US",
     contactName: "", contactTitle: "", contactEmail: "", contactPhone: "",
@@ -147,91 +194,70 @@ export default function SafetyIQOrderForm() {
     employees: "", notes: "",
   });
 
-  // ── Logo for docx
   const [logoData, setLogoData] = useState(null);
-  const logoInputRef = useRef(null);
 
-  // Pre-load logo from embedded base64 (we'll embed it at build time in the real deploy)
-  // For now, provide a file picker
-  const handleLogoUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setLogoData(reader.result);
-    reader.readAsDataURL(reader.result ? undefined : file);
-    // simpler:
-    const r2 = new FileReader();
-    r2.onload = (ev) => setLogoData(ev.target.result);
-    r2.readAsArrayBuffer(file);
-  };
+  /* ── Stable callbacks ── */
+  const handleDiscountChange = useCallback((id, val) => {
+    setLineDiscounts(prev => ({ ...prev, [id]: val }));
+  }, []);
+
+  const updateCustomItem = useCallback((product, itemUid, field, value) => {
+    setCustomItems(prev => ({
+      ...prev,
+      [product]: prev[product].map(ci => ci.uid === itemUid ? { ...ci, [field]: field === "price" ? Number(value) || 0 : value } : ci),
+    }));
+  }, []);
+
+  const removeCustomItem = useCallback((product, itemUid) => {
+    setCustomItems(prev => ({ ...prev, [product]: prev[product].filter(ci => ci.uid !== itemUid) }));
+  }, []);
+
+  const addCustomItem = useCallback((product) => {
+    setCustomItems(prev => ({
+      ...prev,
+      [product]: [...prev[product], { uid: uid(), name: "", desc: "", price: 0 }],
+    }));
+  }, []);
 
   /* ── Pricing calculations ── */
-  const pkg = PACKAGES.find(p => p.id === selectedPackage);
+  const pkg = selectedPackage ? PACKAGES.find(p => p.id === selectedPackage) : null;
   const pkgPrice = pkg?.prices[tier] ?? 0;
 
-  // Package modules (with overrides)
   const getActivePackageModules = () => {
     if (!pkg) return [];
     const overrides = packageModuleOverrides[selectedPackage] || {};
     const base = [...pkg.defaultModules];
     Object.entries(overrides).forEach(([modId, included]) => {
       if (included && !base.includes(modId)) base.push(modId);
-      if (!included) {
-        const idx = base.indexOf(modId);
-        if (idx > -1) base.splice(idx, 1);
-      }
+      if (!included) { const idx = base.indexOf(modId); if (idx > -1) base.splice(idx, 1); }
     });
     return base;
   };
 
-  // SI total
   const calcSITotal = () => {
-    if (siMode === "package") {
+    if (siMode === "none") return 0;
+    if (siMode === "package" || siMode === "addon") {
+      if (!pkg) return 0;
       let addonTotal = 0;
       Object.entries(selectedModules).forEach(([modId, on]) => {
         if (on && !getActivePackageModules().includes(modId)) {
           const mod = SI_MODULES.find(m => m.id === modId);
-          if (mod) {
-            const price = mod.prices[tier] || 0;
-            const disc = lineDiscounts[modId] || 0;
-            addonTotal += price * (1 - disc / 100);
-          }
+          if (mod) { const price = mod.prices[tier] || 0; const disc = lineDiscounts[modId] || 0; addonTotal += price * (1 - disc / 100); }
         }
       });
       const disc = lineDiscounts[selectedPackage] || 0;
       return pkgPrice * (1 - disc / 100) + addonTotal;
     }
-    if (siMode === "addon") {
-      let addonTotal = 0;
-      Object.entries(selectedModules).forEach(([modId, on]) => {
-        if (on && !getActivePackageModules().includes(modId)) {
-          const mod = SI_MODULES.find(m => m.id === modId);
-          if (mod) {
-            const price = mod.prices[tier] || 0;
-            const disc = lineDiscounts[modId] || 0;
-            addonTotal += price * (1 - disc / 100);
-          }
-        }
-      });
-      const disc = lineDiscounts[selectedPackage] || 0;
-      return pkgPrice * (1 - disc / 100) + addonTotal;
-    }
-    // alacarte
     let total = BASE_PLATFORM_FEE[tier] || 0;
     Object.entries(selectedModules).forEach(([modId, on]) => {
       if (on) {
         const mod = SI_MODULES.find(m => m.id === modId);
-        if (mod) {
-          const price = mod.prices[tier] || 0;
-          const disc = lineDiscounts[modId] || 0;
-          total += price * (1 - disc / 100);
-        }
+        if (mod) { const price = mod.prices[tier] || 0; const disc = lineDiscounts[modId] || 0; total += price * (1 - disc / 100); }
       }
     });
     return total;
   };
 
-  // DRUID total
   const calcDRUIDTotal = () => {
     if (!druidEnabled) return 0;
     const base = getDruidAnnual(druidUsers);
@@ -239,7 +265,6 @@ export default function SafetyIQOrderForm() {
     return base * (1 - disc / 100);
   };
 
-  // JESI total
   const calcJESITotal = () => {
     let total = 0;
     JESI_ITEMS.forEach(item => {
@@ -252,7 +277,6 @@ export default function SafetyIQOrderForm() {
     return total;
   };
 
-  // Custom items total
   const calcCustomTotal = (product) => {
     return (customItems[product] || []).reduce((sum, ci) => {
       const disc = lineDiscounts[ci.uid] || 0;
@@ -263,7 +287,6 @@ export default function SafetyIQOrderForm() {
   const annualTotal = calcSITotal() + calcDRUIDTotal() + calcJESITotal() +
     calcCustomTotal("si") + calcCustomTotal("druid") + calcCustomTotal("jesi");
 
-  // Proration
   const calcProration = () => {
     if (!existingContractEnd || !newStartDate) return null;
     const end = new Date(existingContractEnd);
@@ -280,17 +303,14 @@ export default function SafetyIQOrderForm() {
   const buildPaymentSchedule = () => {
     const schedule = [];
     const esc = escalator / 100;
-    let base = annualTotal;
     if (proration) {
       schedule.push({ year: "Year 1 (Prorated)", amount: proration.proratedYear1, note: `${proration.days} days` });
       for (let y = 2; y <= Math.ceil(contractTerm / 12); y++) {
-        base = annualTotal * Math.pow(1 + esc, y - 1);
-        schedule.push({ year: `Year ${y}`, amount: Math.round(base), note: "" });
+        schedule.push({ year: `Year ${y}`, amount: Math.round(annualTotal * Math.pow(1 + esc, y - 1)), note: "" });
       }
     } else {
       for (let y = 1; y <= Math.ceil(contractTerm / 12); y++) {
-        base = annualTotal * Math.pow(1 + esc, y - 1);
-        schedule.push({ year: `Year ${y}`, amount: Math.round(base), note: "" });
+        schedule.push({ year: `Year ${y}`, amount: Math.round(annualTotal * Math.pow(1 + esc, y - 1)), note: "" });
       }
     }
     return schedule;
@@ -298,24 +318,6 @@ export default function SafetyIQOrderForm() {
 
   const totalContractValue = buildPaymentSchedule().reduce((s, r) => s + r.amount, 0);
 
-  /* ── Custom line item helpers ── */
-  const addCustomItem = (product) => {
-    setCustomItems(prev => ({
-      ...prev,
-      [product]: [...prev[product], { uid: uid(), name: "", desc: "", price: 0 }],
-    }));
-  };
-  const updateCustomItem = (product, uid, field, value) => {
-    setCustomItems(prev => ({
-      ...prev,
-      [product]: prev[product].map(ci => ci.uid === uid ? { ...ci, [field]: field === "price" ? Number(value) || 0 : value } : ci),
-    }));
-  };
-  const removeCustomItem = (product, uid) => {
-    setCustomItems(prev => ({ ...prev, [product]: prev[product].filter(ci => ci.uid !== uid) }));
-  };
-
-  /* ── Navigation ── */
   const goStep = (s) => { setStep(s); window.scrollTo(0, 0); };
 
   /* ══════════════════════════════════════════════════════════
@@ -326,7 +328,7 @@ export default function SafetyIQOrderForm() {
     try {
       const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
               Header, Footer, AlignmentType, BorderStyle, WidthType, ShadingType,
-              HeadingLevel, PageNumber, ImageRun, PageBreak } = await import("docx");
+              PageNumber, ImageRun } = await import("docx");
       const { saveAs } = await import("file-saver");
 
       const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
@@ -348,98 +350,72 @@ export default function SafetyIQOrderForm() {
         })],
       });
 
-      // Build line items for the table
+      // Build line items
       const lineItems = [];
 
-      // SI
-      if (siMode === "package" || siMode === "addon") {
+      if ((siMode === "package" || siMode === "addon") && pkg) {
         const disc = lineDiscounts[selectedPackage] || 0;
-        const price = pkgPrice;
-        const final = Math.round(price * (1 - disc / 100));
-        lineItems.push({ name: `Safety Indicators — ${pkg.label} Package`, desc: pkg.tagline, annual: final, disc });
-
-        // Add-on modules
+        lineItems.push({ name: `Safety Indicators — ${pkg.label} Package`, desc: pkg.tagline, annual: Math.round(pkgPrice * (1 - disc / 100)), disc });
         SI_MODULES.forEach(mod => {
           if (selectedModules[mod.id] && !getActivePackageModules().includes(mod.id)) {
             const d = lineDiscounts[mod.id] || 0;
-            const p = mod.prices[tier] || 0;
-            lineItems.push({ name: `  + ${mod.name}`, desc: mod.desc, annual: Math.round(p * (1 - d / 100)), disc: d });
+            lineItems.push({ name: `  + ${mod.name}`, desc: mod.desc, annual: Math.round((mod.prices[tier] || 0) * (1 - d / 100)), disc: d });
           }
         });
-      } else {
-        lineItems.push({ name: "Safety Indicators — Base Platform Fee", desc: "Required for à la carte", annual: BASE_PLATFORM_FEE[tier], disc: 0 });
-        SI_MODULES.forEach(mod => {
-          if (selectedModules[mod.id]) {
-            const d = lineDiscounts[mod.id] || 0;
-            const p = mod.prices[tier] || 0;
-            lineItems.push({ name: mod.name, desc: mod.desc, annual: Math.round(p * (1 - d / 100)), disc: d });
-          }
-        });
+      } else if (siMode === "alacarte") {
+        const hasModules = Object.values(selectedModules).some(Boolean);
+        if (hasModules) {
+          lineItems.push({ name: "Safety Indicators — Base Platform Fee", desc: "Required for à la carte", annual: BASE_PLATFORM_FEE[tier], disc: 0 });
+          SI_MODULES.forEach(mod => {
+            if (selectedModules[mod.id]) {
+              const d = lineDiscounts[mod.id] || 0;
+              lineItems.push({ name: mod.name, desc: mod.desc, annual: Math.round((mod.prices[tier] || 0) * (1 - d / 100)), disc: d });
+            }
+          });
+        }
       }
 
-      // SI custom items
       customItems.si.forEach(ci => {
-        if (ci.name) {
-          const d = lineDiscounts[ci.uid] || 0;
-          lineItems.push({ name: ci.name, desc: ci.desc, annual: Math.round(ci.price * (1 - d / 100)), disc: d });
-        }
+        if (ci.name) { const d = lineDiscounts[ci.uid] || 0; lineItems.push({ name: ci.name, desc: ci.desc, annual: Math.round(ci.price * (1 - d / 100)), disc: d }); }
       });
 
-      // DRUID
       if (druidEnabled) {
         const dt = getDruidTier(druidUsers);
         const d = lineDiscounts["druid"] || 0;
-        const base = getDruidAnnual(druidUsers);
-        lineItems.push({
-          name: `DRUID — Impairment Detection (${druidUsers} users)`,
-          desc: `$${dt.pricePerUserMonth}/user/month`,
-          annual: Math.round(base * (1 - d / 100)), disc: d,
-        });
-        customItems.druid.forEach(ci => {
-          if (ci.name) {
-            const dd = lineDiscounts[ci.uid] || 0;
-            lineItems.push({ name: ci.name, desc: ci.desc, annual: Math.round(ci.price * (1 - dd / 100)), disc: dd });
-          }
-        });
+        lineItems.push({ name: `DRUID — Impairment Detection (${druidUsers} users)`, desc: `$${dt.pricePerUserMonth}/user/month`, annual: Math.round(getDruidAnnual(druidUsers) * (1 - d / 100)), disc: d });
+        customItems.druid.forEach(ci => { if (ci.name) { const dd = lineDiscounts[ci.uid] || 0; lineItems.push({ name: ci.name, desc: ci.desc, annual: Math.round(ci.price * (1 - dd / 100)), disc: dd }); } });
       }
 
-      // JESI
       JESI_ITEMS.forEach(item => {
         if (jesiSelections[item.id]) {
           const d = lineDiscounts[item.id] || 0;
-          const p = item.prices[tier] || 0;
-          lineItems.push({ name: item.name, desc: item.desc, annual: Math.round(p * (1 - d / 100)), disc: d });
+          lineItems.push({ name: item.name, desc: item.desc, annual: Math.round((item.prices[tier] || 0) * (1 - d / 100)), disc: d });
         }
       });
-      customItems.jesi.forEach(ci => {
-        if (ci.name) {
-          const d = lineDiscounts[ci.uid] || 0;
-          lineItems.push({ name: ci.name, desc: ci.desc, annual: Math.round(ci.price * (1 - d / 100)), disc: d });
-        }
-      });
+      customItems.jesi.forEach(ci => { if (ci.name) { const d = lineDiscounts[ci.uid] || 0; lineItems.push({ name: ci.name, desc: ci.desc, annual: Math.round(ci.price * (1 - d / 100)), disc: d }); } });
 
-      // Payment schedule
       const schedule = buildPaymentSchedule();
 
-      // Build logo paragraph
+      // Header with logo — right-aligned, 387×100 at 96 DPI
       const headerChildren = [];
       if (logoData) {
         try {
           let buf;
-          if (logoData instanceof ArrayBuffer) {
-            buf = new Uint8Array(logoData);
-          } else if (typeof logoData === "string" && logoData.startsWith("data:")) {
+          if (typeof logoData === "string" && logoData.startsWith("data:")) {
             const b64 = logoData.split(",")[1];
             const binary = atob(b64);
             buf = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
           }
           if (buf) {
+            const mimeMatch = logoData.match(/data:image\/(png|jpg|jpeg|gif|bmp)/i);
+            const imgType = mimeMatch ? mimeMatch[1].replace("jpeg", "jpg") : "png";
             headerChildren.push(new Paragraph({
+              alignment: AlignmentType.RIGHT,
               children: [new ImageRun({
-                type: "jpg",
+                type: imgType,
                 data: buf,
-                transformation: { width: 220, height: 47 },
+                transformation: { width: 387, height: 100 },
                 altText: { title: "SafetyIQ Logo", description: "SafetyIQ, Inc. company logo", name: "SIQ_Logo" },
               })],
             }));
@@ -452,72 +428,42 @@ export default function SafetyIQOrderForm() {
         spacing: { before: logoData ? 120 : 0, after: 60 },
       }));
 
-      // Customer info rows
       const infoRow = (label, value) => new TableRow({
-        children: [
-          cell(label, 2800, { bold: true }),
-          cell(value || "—", 6560),
-        ],
+        children: [cell(label, 2800, { bold: true }), cell(value || "—", 6560)],
       });
 
       const doc = new Document({
-        styles: {
-          default: { document: { run: { font: "Arial", size: 20 } } },
-        },
+        styles: { default: { document: { run: { font: "Arial", size: 20 } } } },
         sections: [{
           properties: {
-            page: {
-              size: { width: 12240, height: 15840 },
-              margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
-            },
+            page: { size: { width: 12240, height: 15840 }, margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } },
           },
-          headers: {
-            default: new Header({ children: headerChildren }),
-          },
+          headers: { default: new Header({ children: headerChildren }) },
           footers: {
-            default: new Footer({
-              children: [new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                  new TextRun({ text: "SafetyIQ, Inc. · Confidential · Page ", font: "Arial", size: 16, color: "888888" }),
-                  new TextRun({ children: [PageNumber.CURRENT], font: "Arial", size: 16, color: "888888" }),
-                ],
-              })],
-            }),
+            default: new Footer({ children: [new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [
+                new TextRun({ text: "SafetyIQ, Inc. · Confidential · Page ", font: "Arial", size: 16, color: "888888" }),
+                new TextRun({ children: [PageNumber.CURRENT], font: "Arial", size: 16, color: "888888" }),
+              ],
+            })] }),
           },
           children: [
-            // Customer info
             new Paragraph({ spacing: { before: 200, after: 100 }, children: [new TextRun({ text: "CUSTOMER INFORMATION", bold: true, font: "Arial", size: 22, color: "0A1628" })] }),
             new Table({
-              width: { size: 9360, type: WidthType.DXA },
-              columnWidths: [2800, 6560],
+              width: { size: 9360, type: WidthType.DXA }, columnWidths: [2800, 6560],
               rows: [
-                infoRow("Company", customer.company),
-                infoRow("Address", [customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", ")),
-                infoRow("Contact", customer.contactName),
-                infoRow("Title", customer.contactTitle),
-                infoRow("Email", customer.contactEmail),
-                infoRow("Phone", customer.contactPhone),
-                infoRow("Employees", customer.employees),
-                infoRow("Employee Tier", EMPLOYEE_TIERS.find(t => t.id === tier)?.range || tier),
+                infoRow("Company", customer.company), infoRow("Address", [customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", ")),
+                infoRow("Contact", customer.contactName), infoRow("Title", customer.contactTitle),
+                infoRow("Email", customer.contactEmail), infoRow("Phone", customer.contactPhone),
+                infoRow("Employees", customer.employees), infoRow("Employee Tier", EMPLOYEE_TIERS.find(t => t.id === tier)?.range || tier),
               ],
             }),
-
             new Paragraph({ spacing: { before: 300, after: 100 }, children: [new TextRun({ text: "PRODUCTS & PRICING", bold: true, font: "Arial", size: 22, color: "0A1628" })] }),
-
-            // Line items table
-            new Table({
-              width: { size: 9360, type: WidthType.DXA },
-              columnWidths: [4000, 3160, 1200, 1000],
+            ...(lineItems.length > 0 ? [new Table({
+              width: { size: 9360, type: WidthType.DXA }, columnWidths: [4000, 3160, 1200, 1000],
               rows: [
-                new TableRow({
-                  children: [
-                    hdrCell("Product / Module", 4000),
-                    hdrCell("Description", 3160),
-                    hdrCell("Annual", 1200),
-                    hdrCell("Disc %", 1000),
-                  ],
-                }),
+                new TableRow({ children: [hdrCell("Product / Module", 4000), hdrCell("Description", 3160), hdrCell("Annual", 1200), hdrCell("Disc %", 1000)] }),
                 ...lineItems.map((li, i) => new TableRow({
                   children: [
                     cell(li.name, 4000, { shade: i % 2 === 1, bold: !li.name.startsWith("  ") }),
@@ -526,79 +472,39 @@ export default function SafetyIQOrderForm() {
                     cell(li.disc ? `${li.disc}%` : "", 1000, { shade: i % 2 === 1, align: AlignmentType.CENTER }),
                   ],
                 })),
-                // Total row
-                new TableRow({
-                  children: [
-                    cell("", 4000, { bold: true }),
-                    cell("Annual Total", 3160, { bold: true, align: AlignmentType.RIGHT }),
-                    cell(fmt(annualTotal), 1200, { bold: true, align: AlignmentType.RIGHT, color: "0A5C36" }),
-                    cell("", 1000),
-                  ],
-                }),
+                new TableRow({ children: [cell("", 4000), cell("Annual Total", 3160, { bold: true, align: AlignmentType.RIGHT }), cell(fmt(annualTotal), 1200, { bold: true, align: AlignmentType.RIGHT, color: "0A5C36" }), cell("", 1000)] }),
               ],
-            }),
-
-            // Contract terms
+            })] : [new Paragraph({ children: [new TextRun({ text: "No products selected.", font: "Arial", size: 20, italics: true, color: "888888" })] })]),
             new Paragraph({ spacing: { before: 300, after: 100 }, children: [new TextRun({ text: "CONTRACT TERMS", bold: true, font: "Arial", size: 22, color: "0A1628" })] }),
             new Table({
-              width: { size: 9360, type: WidthType.DXA },
-              columnWidths: [2800, 6560],
+              width: { size: 9360, type: WidthType.DXA }, columnWidths: [2800, 6560],
               rows: [
-                infoRow("Contract Term", `${contractTerm} months`),
-                infoRow("Annual Escalator", `${escalator}%`),
-                ...(proration ? [
-                  infoRow("Coterminus Start", newStartDate),
-                  infoRow("Existing Contract End", existingContractEnd),
-                  infoRow("Prorated Days", `${proration.days} days`),
-                ] : []),
+                infoRow("Contract Term", `${contractTerm} months`), infoRow("Annual Escalator", `${escalator}%`),
+                ...(proration ? [infoRow("Coterminus Start", newStartDate), infoRow("Existing Contract End", existingContractEnd), infoRow("Prorated Days", `${proration.days} days`)] : []),
               ],
             }),
-
-            // Payment schedule
             new Paragraph({ spacing: { before: 300, after: 100 }, children: [new TextRun({ text: "PAYMENT SCHEDULE", bold: true, font: "Arial", size: 22, color: "0A1628" })] }),
             new Table({
-              width: { size: 9360, type: WidthType.DXA },
-              columnWidths: [3000, 3360, 3000],
+              width: { size: 9360, type: WidthType.DXA }, columnWidths: [3000, 3360, 3000],
               rows: [
                 new TableRow({ children: [hdrCell("Period", 3000), hdrCell("Amount", 3360), hdrCell("Note", 3000)] }),
                 ...schedule.map((row, i) => new TableRow({
-                  children: [
-                    cell(row.year, 3000, { shade: i % 2 === 1 }),
-                    cell(fmt(row.amount), 3360, { shade: i % 2 === 1, align: AlignmentType.RIGHT }),
-                    cell(row.note, 3000, { shade: i % 2 === 1 }),
-                  ],
+                  children: [cell(row.year, 3000, { shade: i % 2 === 1 }), cell(fmt(row.amount), 3360, { shade: i % 2 === 1, align: AlignmentType.RIGHT }), cell(row.note, 3000, { shade: i % 2 === 1 })],
                 })),
-                new TableRow({
-                  children: [
-                    cell("", 3000, { bold: true }),
-                    cell(fmt(totalContractValue), 3360, { bold: true, align: AlignmentType.RIGHT, color: "0A5C36" }),
-                    cell("Total Contract Value", 3000, { bold: true }),
-                  ],
-                }),
+                new TableRow({ children: [cell("", 3000), cell(fmt(totalContractValue), 3360, { bold: true, align: AlignmentType.RIGHT, color: "0A5C36" }), cell("Total Contract Value", 3000, { bold: true })] }),
               ],
             }),
-
-            // Signature block
             new Paragraph({ spacing: { before: 400, after: 100 }, children: [new TextRun({ text: "AUTHORIZATION", bold: true, font: "Arial", size: 22, color: "0A1628" })] }),
             new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: "By signing below, both parties agree to the terms outlined in this Service Order Form.", font: "Arial", size: 20 })] }),
-
             new Table({
-              width: { size: 9360, type: WidthType.DXA },
-              columnWidths: [4680, 4680],
+              width: { size: 9360, type: WidthType.DXA }, columnWidths: [4680, 4680],
               rows: [
                 new TableRow({ children: [hdrCell("Customer", 4680), hdrCell("SafetyIQ, Inc.", 4680)] }),
                 ...[["Signature:", "Signature:"], ["Name:", "Name:"], ["Title:", "Title:"], ["Date:", "Date:"]].map(([l, r]) =>
-                  new TableRow({
-                    children: [
-                      cell(l + "  ____________________________", 4680),
-                      cell(r + "  ____________________________", 4680),
-                    ],
-                  })
+                  new TableRow({ children: [cell(l + "  ____________________________", 4680), cell(r + "  ____________________________", 4680)] })
                 ),
               ],
             }),
-
-            // Notes
             ...(customer.notes ? [
               new Paragraph({ spacing: { before: 300, after: 60 }, children: [new TextRun({ text: "NOTES", bold: true, font: "Arial", size: 22, color: "0A1628" })] }),
               new Paragraph({ children: [new TextRun({ text: customer.notes, font: "Arial", size: 20 })] }),
@@ -617,138 +523,71 @@ export default function SafetyIQOrderForm() {
     setGenerating(false);
   };
 
-  /* ── Submit ── */
-  const handleSubmit = () => goStep(5);
-
-  /* ══════════════════════════════════════════════════════════
-     STYLES
-     ══════════════════════════════════════════════════════════ */
-  const bg = "#060b16";
-  const card = "#0d1526";
-  const cardBorder = "#1a2540";
-  const accent = "#2563eb";
-  const green = "#0ea578";
-  const gold = "#d97706";
-  const textPrimary = "#e8ecf4";
-  const textSecondary = "#8ea4c8";
-  const textMuted = "#3a4a68";
-
-  const cardStyle = { background: card, border: `1px solid ${cardBorder}`, borderRadius: 14, padding: 24, marginBottom: 20 };
-  const inputStyle = { width: "100%", padding: "10px 14px", borderRadius: 8, border: `1px solid ${cardBorder}`, background: "#0a1020", color: textPrimary, fontSize: 14, outline: "none" };
-  const labelStyle = { display: "block", fontSize: 12, color: textSecondary, marginBottom: 4, fontWeight: 500 };
-  const btnPrimary = { padding: "14px 32px", borderRadius: 10, border: "none", background: `linear-gradient(135deg, ${accent}, ${green})`, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", boxShadow: "0 4px 20px rgba(37,99,235,0.3)", transition: "transform 0.15s" };
-  const btnSecondary = { padding: "10px 20px", borderRadius: 8, border: `1px solid ${cardBorder}`, background: "transparent", color: textSecondary, fontWeight: 600, fontSize: 13, cursor: "pointer" };
-  const sectionTitle = { fontSize: 18, fontWeight: 700, color: textPrimary, marginBottom: 16 };
-  const chipActive = (color) => ({ padding: "8px 16px", borderRadius: 8, border: `2px solid ${color}`, background: color + "18", color, fontWeight: 600, fontSize: 13, cursor: "pointer" });
-  const chipInactive = { padding: "8px 16px", borderRadius: 8, border: `2px solid ${cardBorder}`, background: "transparent", color: textSecondary, fontWeight: 500, fontSize: 13, cursor: "pointer" };
-
-  const DocIcon = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ marginRight: 6, verticalAlign: "middle" }}><path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.5" fill="none"/><path d="M10 1v4h4" stroke="currentColor" strokeWidth="1.5"/></svg>;
-
-  /* ── Discount input ── */
-  const DiscountInput = ({ id }) => (
-    <input type="number" min="0" max="100" placeholder="%" value={lineDiscounts[id] || ""} onChange={e => setLineDiscounts(prev => ({ ...prev, [id]: Number(e.target.value) || 0 }))}
-      style={{ width: 56, padding: "4px 6px", borderRadius: 6, border: `1px solid ${cardBorder}`, background: "#0a1020", color: textPrimary, fontSize: 12, textAlign: "center" }} />
-  );
-
-  /* ── Module toggle ── */
-  const ModuleToggle = ({ mod, disabled }) => {
-    const checked = selectedModules[mod.id] || false;
-    const price = mod.prices[tier] || 0;
-    const disc = lineDiscounts[mod.id] || 0;
-    const final = Math.round(price * (1 - disc / 100));
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: `1px solid ${disabled ? textMuted : checked ? accent : cardBorder}`, background: disabled ? "#0a0f1a" : checked ? accent + "10" : "transparent", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer", marginBottom: 8, transition: "all 0.15s" }}
-        onClick={() => !disabled && setSelectedModules(prev => ({ ...prev, [mod.id]: !prev[mod.id] }))}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${checked ? accent : cardBorder}`, background: checked ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {checked && <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>✓</span>}
-          </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: disabled ? textMuted : textPrimary }}>{mod.name}</div>
-            <div style={{ fontSize: 11, color: textSecondary }}>{mod.desc}</div>
-          </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: disabled ? textMuted : green }}>{fmt(final)}<span style={{ fontSize: 10, fontWeight: 400 }}>/yr</span></div>
-          {!disabled && <DiscountInput id={mod.id} />}
-        </div>
-      </div>
-    );
-  };
-
-  /* ── Custom item row ── */
-  const CustomItemRow = ({ product, ci }) => (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-      <input placeholder="Line item name" value={ci.name} onChange={e => updateCustomItem(product, ci.uid, "name", e.target.value)} style={{ ...inputStyle, flex: 2 }} />
-      <input placeholder="Description" value={ci.desc} onChange={e => updateCustomItem(product, ci.uid, "desc", e.target.value)} style={{ ...inputStyle, flex: 2 }} />
-      <input type="number" placeholder="Annual $" value={ci.price || ""} onChange={e => updateCustomItem(product, ci.uid, "price", e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-      <DiscountInput id={ci.uid} />
-      <button onClick={() => removeCustomItem(product, ci.uid)} style={{ ...btnSecondary, padding: "6px 10px", color: "#ef4444", borderColor: "#ef4444" }}>✕</button>
-    </div>
-  );
-
   /* ══════════════════════════════════════════════════════════
      RENDER
      ══════════════════════════════════════════════════════════ */
   return (
-    <div style={{ fontFamily: "'DM Sans', system-ui, sans-serif", background: bg, minHeight: "100vh", color: textPrimary }}>
+    <div style={{ fontFamily: "'DM Sans', system-ui, sans-serif", background: T.bg, minHeight: "100vh", color: T.textPrimary }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
       <div style={{ maxWidth: 960, margin: "0 auto", padding: "32px 20px" }}>
-        {/* Header */}
         <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <h1 style={{ fontSize: 28, fontWeight: 800, background: `linear-gradient(135deg, ${accent}, ${green})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 4 }}>SafetyIQ Order Form</h1>
-          <p style={{ fontSize: 13, color: textSecondary }}>Configure products, pricing & generate a professional order document</p>
+          <h1 style={{ fontSize: 28, fontWeight: 800, background: `linear-gradient(135deg, ${T.accent}, ${T.green})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 4 }}>SafetyIQ Order Form</h1>
+          <p style={{ fontSize: 13, color: T.textSecondary }}>Configure products, pricing & generate a professional order document</p>
         </div>
 
-        {/* Step indicators */}
         <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 32 }}>
           {["Products", "Contract", "Customer", "Review"].map((s, i) => (
-            <div key={i} onClick={() => goStep(i + 1)} style={{ padding: "6px 18px", borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: "pointer", background: step === i + 1 ? accent : "transparent", color: step === i + 1 ? "#fff" : textMuted, border: `1px solid ${step === i + 1 ? accent : cardBorder}`, transition: "all 0.15s" }}>{i + 1}. {s}</div>
+            <div key={i} onClick={() => goStep(i + 1)} style={{ padding: "6px 18px", borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: "pointer", background: step === i + 1 ? T.accent : "transparent", color: step === i + 1 ? "#fff" : T.textMuted, border: `1px solid ${step === i + 1 ? T.accent : T.cardBorder}`, transition: "all 0.15s" }}>{i + 1}. {s}</div>
           ))}
         </div>
 
         {/* ── STEP 1: Products ── */}
         {step === 1 && (
           <div>
-            {/* Employee Tier Selector */}
             <div style={cardStyle}>
               <div style={sectionTitle}>Employee Tier</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {EMPLOYEE_TIERS.map(t => (
-                  <div key={t.id} onClick={() => setTier(t.id)} style={tier === t.id ? chipActive(accent) : chipInactive}>{t.label}</div>
+                  <div key={t.id} onClick={() => setTier(t.id)} style={tier === t.id ? chipActive(T.accent) : chipInactive}>{t.label}</div>
                 ))}
               </div>
             </div>
 
             {/* Safety Indicators */}
             <div style={cardStyle}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
                 <div style={sectionTitle}>🛡️ Safety Indicators</div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {["package", "addon", "alacarte"].map(mode => (
-                    <div key={mode} onClick={() => setSiMode(mode)} style={siMode === mode ? chipActive(accent) : chipInactive}>
-                      {mode === "package" ? "Package" : mode === "addon" ? "Package + Add-Ons" : "À La Carte"}
-                    </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {[
+                    { key: "none", label: "None" },
+                    { key: "package", label: "Package" },
+                    { key: "addon", label: "Package + Add-Ons" },
+                    { key: "alacarte", label: "À La Carte" },
+                  ].map(mode => (
+                    <div key={mode.key} onClick={() => {
+                      setSiMode(mode.key);
+                      if (mode.key === "none") { setSelectedPackage(null); setSelectedModules({}); }
+                      if ((mode.key === "package" || mode.key === "addon") && !selectedPackage) setSelectedPackage("launch");
+                    }} style={siMode === mode.key ? chipActive(T.accent) : chipInactive}>{mode.label}</div>
                   ))}
                 </div>
               </div>
 
-              {/* Package selector */}
-              {(siMode === "package" || siMode === "addon") && (
+              {siMode !== "none" && (siMode === "package" || siMode === "addon") && (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
                   {PACKAGES.map(p => (
-                    <div key={p.id} onClick={() => setSelectedPackage(p.id)}
-                      style={{ padding: 16, borderRadius: 12, border: `2px solid ${selectedPackage === p.id ? p.color : cardBorder}`, background: selectedPackage === p.id ? p.color + "12" : "transparent", cursor: "pointer", transition: "all 0.15s", position: "relative" }}>
+                    <div key={p.id} onClick={() => setSelectedPackage(selectedPackage === p.id ? null : p.id)}
+                      style={{ padding: 16, borderRadius: 12, border: `2px solid ${selectedPackage === p.id ? p.color : T.cardBorder}`, background: selectedPackage === p.id ? p.color + "12" : "transparent", cursor: "pointer", transition: "all 0.15s", position: "relative" }}>
                       {p.popular && <div style={{ position: "absolute", top: -8, right: 12, background: p.color, color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10 }}>POPULAR</div>}
                       <div style={{ fontSize: 16, fontWeight: 700, color: p.color }}>{p.label}</div>
-                      <div style={{ fontSize: 11, color: textSecondary, marginBottom: 8 }}>{p.tagline}</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: textPrimary }}>{fmt(p.prices[tier])}<span style={{ fontSize: 11, fontWeight: 400, color: textSecondary }}>/yr</span></div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
-                        <DiscountInput id={p.id} />
-                        <span style={{ fontSize: 11, color: textSecondary }}>% off</span>
+                      <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 8 }}>{p.tagline}</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: T.textPrimary }}>{fmt(p.prices[tier])}<span style={{ fontSize: 11, fontWeight: 400, color: T.textSecondary }}>/yr</span></div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }} onClick={e => e.stopPropagation()}>
+                        <DiscountInput value={lineDiscounts[p.id] || 0} onChange={(val) => handleDiscountChange(p.id, val)} />
+                        <span style={{ fontSize: 11, color: T.textSecondary }}>% off</span>
                       </div>
-                      <div style={{ marginTop: 8, fontSize: 11, color: textSecondary }}>
+                      <div style={{ marginTop: 8, fontSize: 11, color: T.textSecondary }}>
                         {p.defaultModules.map(mId => SI_MODULES.find(m => m.id === mId)?.name).filter(Boolean).join(", ")}
                       </div>
                     </div>
@@ -756,30 +595,47 @@ export default function SafetyIQOrderForm() {
                 </div>
               )}
 
-              {/* Add-on modules */}
               {siMode === "addon" && (
                 <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: textSecondary, marginBottom: 8 }}>Add-On Modules</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: T.textSecondary, marginBottom: 8 }}>Add-On Modules</div>
                   {SI_MODULES.filter(m => !getActivePackageModules().includes(m.id)).map(mod => (
-                    <ModuleToggle key={mod.id} mod={mod} />
+                    <ModuleToggle key={mod.id} mod={mod} checked={selectedModules[mod.id] || false}
+                      price={mod.prices[tier] || 0} disc={lineDiscounts[mod.id] || 0} accentColor={T.accent}
+                      onToggle={() => setSelectedModules(prev => ({ ...prev, [mod.id]: !prev[mod.id] }))}
+                      onDiscChange={(val) => handleDiscountChange(mod.id, val)} />
                   ))}
                 </div>
               )}
 
-              {/* À la carte */}
               {siMode === "alacarte" && (
                 <div>
-                  <div style={{ fontSize: 13, color: gold, marginBottom: 12, padding: "8px 12px", background: gold + "12", borderRadius: 8 }}>
+                  <div style={{ fontSize: 13, color: T.gold, marginBottom: 12, padding: "8px 12px", background: T.gold + "12", borderRadius: 8 }}>
                     Base Platform Fee: <strong>{fmt(BASE_PLATFORM_FEE[tier])}</strong>/yr (required)
                   </div>
-                  {SI_MODULES.map(mod => <ModuleToggle key={mod.id} mod={mod} />)}
+                  {SI_MODULES.map(mod => (
+                    <ModuleToggle key={mod.id} mod={mod} checked={selectedModules[mod.id] || false}
+                      price={mod.prices[tier] || 0} disc={lineDiscounts[mod.id] || 0} accentColor={T.accent}
+                      onToggle={() => setSelectedModules(prev => ({ ...prev, [mod.id]: !prev[mod.id] }))}
+                      onDiscChange={(val) => handleDiscountChange(mod.id, val)} />
+                  ))}
                 </div>
               )}
 
-              {/* Custom SI items */}
+              {siMode === "none" && (
+                <div style={{ padding: 16, borderRadius: 10, border: `1px dashed ${T.cardBorder}`, textAlign: "center", color: T.textMuted, fontSize: 13 }}>
+                  No Safety Indicators products selected. Choose a mode above or add custom line items below.
+                </div>
+              )}
+
               <div style={{ marginTop: 16 }}>
                 <button onClick={() => addCustomItem("si")} style={btnSecondary}>+ Custom SI Line Item</button>
-                {customItems.si.map(ci => <CustomItemRow key={ci.uid} product="si" ci={ci} />)}
+                {customItems.si.map(ci => (
+                  <CustomItemRow key={ci.uid} ci={ci}
+                    onUpdate={(itemUid, field, val) => updateCustomItem("si", itemUid, field, val)}
+                    onRemove={(itemUid) => removeCustomItem("si", itemUid)}
+                    discValue={lineDiscounts[ci.uid] || 0}
+                    onDiscChange={(val) => handleDiscountChange(ci.uid, val)} />
+                ))}
               </div>
             </div>
 
@@ -787,7 +643,7 @@ export default function SafetyIQOrderForm() {
             <div style={cardStyle}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <div style={sectionTitle}>🧠 DRUID — Impairment Detection</div>
-                <div onClick={() => setDruidEnabled(!druidEnabled)} style={{ width: 44, height: 24, borderRadius: 12, background: druidEnabled ? green : cardBorder, cursor: "pointer", position: "relative", transition: "background 0.2s" }}>
+                <div onClick={() => setDruidEnabled(!druidEnabled)} style={{ width: 44, height: 24, borderRadius: 12, background: druidEnabled ? T.green : T.cardBorder, cursor: "pointer", position: "relative", transition: "background 0.2s" }}>
                   <div style={{ width: 18, height: 18, borderRadius: 9, background: "#fff", position: "absolute", top: 3, left: druidEnabled ? 23 : 3, transition: "left 0.2s" }} />
                 </div>
               </div>
@@ -797,27 +653,33 @@ export default function SafetyIQOrderForm() {
                   <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
                     <label style={labelStyle}>Number of Users</label>
                     <input type="number" min="1" value={druidUsers} onChange={e => setDruidUsers(Math.max(1, parseInt(e.target.value) || 1))} style={{ ...inputStyle, width: 120 }} />
-                    <DiscountInput id="druid" />
-                    <span style={{ fontSize: 11, color: textSecondary }}>% off</span>
+                    <DiscountInput value={lineDiscounts["druid"] || 0} onChange={(val) => handleDiscountChange("druid", val)} />
+                    <span style={{ fontSize: 11, color: T.textSecondary }}>% off</span>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
                     {DRUID_TIERS.map(dt => {
                       const active = getDruidTier(druidUsers).id === dt.id;
                       return (
-                        <div key={dt.id} style={{ padding: 10, borderRadius: 8, border: `1px solid ${active ? green : cardBorder}`, background: active ? green + "12" : "transparent", fontSize: 12 }}>
-                          <div style={{ fontWeight: 600, color: active ? green : textSecondary }}>{dt.label}</div>
-                          <div style={{ fontWeight: 700, color: textPrimary }}>${dt.pricePerUserMonth}/user/mo</div>
+                        <div key={dt.id} style={{ padding: 10, borderRadius: 8, border: `1px solid ${active ? T.green : T.cardBorder}`, background: active ? T.green + "12" : "transparent", fontSize: 12 }}>
+                          <div style={{ fontWeight: 600, color: active ? T.green : T.textSecondary }}>{dt.label}</div>
+                          <div style={{ fontWeight: 700, color: T.textPrimary }}>${dt.pricePerUserMonth}/user/mo</div>
                         </div>
                       );
                     })}
                   </div>
-                  <div style={{ marginTop: 12, fontSize: 15, fontWeight: 700, color: green }}>
+                  <div style={{ marginTop: 12, fontSize: 15, fontWeight: 700, color: T.green }}>
                     Annual: {fmt(getDruidAnnual(druidUsers))}
-                    {lineDiscounts["druid"] > 0 && <span style={{ fontSize: 12, color: textSecondary, marginLeft: 8 }}>→ {fmt(calcDRUIDTotal())} after {lineDiscounts["druid"]}% discount</span>}
+                    {lineDiscounts["druid"] > 0 && <span style={{ fontSize: 12, color: T.textSecondary, marginLeft: 8 }}>→ {fmt(calcDRUIDTotal())} after {lineDiscounts["druid"]}% discount</span>}
                   </div>
                   <div style={{ marginTop: 12 }}>
                     <button onClick={() => addCustomItem("druid")} style={btnSecondary}>+ Custom DRUID Line Item</button>
-                    {customItems.druid.map(ci => <CustomItemRow key={ci.uid} product="druid" ci={ci} />)}
+                    {customItems.druid.map(ci => (
+                      <CustomItemRow key={ci.uid} ci={ci}
+                        onUpdate={(itemUid, field, val) => updateCustomItem("druid", itemUid, field, val)}
+                        onRemove={(itemUid) => removeCustomItem("druid", itemUid)}
+                        discValue={lineDiscounts[ci.uid] || 0}
+                        onDiscChange={(val) => handleDiscountChange(ci.uid, val)} />
+                    ))}
                   </div>
                 </div>
               )}
@@ -830,39 +692,45 @@ export default function SafetyIQOrderForm() {
                 const checked = jesiSelections[item.id];
                 const price = item.prices[tier] || 0;
                 const disc = lineDiscounts[item.id] || 0;
-                const final = Math.round(price * (1 - disc / 100));
+                const finalPrice = Math.round(price * (1 - disc / 100));
                 return (
                   <div key={item.id} onClick={() => setJesiSelections(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 10, border: `1px solid ${checked ? green : cardBorder}`, background: checked ? green + "10" : "transparent", cursor: "pointer", marginBottom: 8, transition: "all 0.15s" }}>
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 10, border: `1px solid ${checked ? T.green : T.cardBorder}`, background: checked ? T.green + "10" : "transparent", cursor: "pointer", marginBottom: 8, transition: "all 0.15s" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${checked ? green : cardBorder}`, background: checked ? green : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${checked ? T.green : T.cardBorder}`, background: checked ? T.green : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
                         {checked && <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>✓</span>}
                       </div>
                       <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>{item.name}</div>
-                        <div style={{ fontSize: 11, color: textSecondary }}>{item.desc}</div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: T.textPrimary }}>{item.name}</div>
+                        <div style={{ fontSize: 11, color: T.textSecondary }}>{item.desc}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: green }}>{fmt(final)}<span style={{ fontSize: 10, fontWeight: 400 }}>/yr</span></div>
-                      <DiscountInput id={item.id} />
+                    <div style={{ textAlign: "right" }} onClick={e => e.stopPropagation()}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: T.green }}>{fmt(finalPrice)}<span style={{ fontSize: 10, fontWeight: 400 }}>/yr</span></div>
+                      <DiscountInput value={disc} onChange={(val) => handleDiscountChange(item.id, val)} />
                     </div>
                   </div>
                 );
               })}
               <div style={{ marginTop: 12 }}>
                 <button onClick={() => addCustomItem("jesi")} style={btnSecondary}>+ Custom JESI Line Item</button>
-                {customItems.jesi.map(ci => <CustomItemRow key={ci.uid} product="jesi" ci={ci} />)}
+                {customItems.jesi.map(ci => (
+                  <CustomItemRow key={ci.uid} ci={ci}
+                    onUpdate={(itemUid, field, val) => updateCustomItem("jesi", itemUid, field, val)}
+                    onRemove={(itemUid) => removeCustomItem("jesi", itemUid)}
+                    discValue={lineDiscounts[ci.uid] || 0}
+                    onDiscChange={(val) => handleDiscountChange(ci.uid, val)} />
+                ))}
               </div>
             </div>
 
             {/* Running total */}
-            <div style={{ ...cardStyle, background: "linear-gradient(135deg, #0d1a30, #0d2520)", borderColor: green }}>
+            <div style={{ ...cardStyle, background: "linear-gradient(135deg, #0d1a30, #0d2520)", borderColor: T.green }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <div style={{ fontSize: 13, color: textSecondary }}>Estimated Annual Total</div>
-                  <div style={{ fontSize: 32, fontWeight: 800, color: green }}>{fmt(annualTotal)}</div>
-                  <div style={{ fontSize: 12, color: textSecondary }}>{fmtM(annualTotal)} equivalent</div>
+                  <div style={{ fontSize: 13, color: T.textSecondary }}>Estimated Annual Total</div>
+                  <div style={{ fontSize: 32, fontWeight: 800, color: T.green }}>{fmt(annualTotal)}</div>
+                  <div style={{ fontSize: 12, color: T.textSecondary }}>{fmtM(annualTotal)} equivalent</div>
                 </div>
                 <button onClick={() => goStep(2)} style={btnPrimary}>Next: Contract →</button>
               </div>
@@ -880,7 +748,7 @@ export default function SafetyIQOrderForm() {
                   <label style={labelStyle}>Contract Term (months)</label>
                   <div style={{ display: "flex", gap: 8 }}>
                     {[12, 24, 36, 48, 60].map(m => (
-                      <div key={m} onClick={() => setContractTerm(m)} style={contractTerm === m ? chipActive(accent) : chipInactive}>{m}mo</div>
+                      <div key={m} onClick={() => setContractTerm(m)} style={contractTerm === m ? chipActive(T.accent) : chipInactive}>{m}mo</div>
                     ))}
                   </div>
                 </div>
@@ -893,7 +761,7 @@ export default function SafetyIQOrderForm() {
 
             <div style={cardStyle}>
               <div style={sectionTitle}>Coterminus Proration (Optional)</div>
-              <p style={{ fontSize: 12, color: textSecondary, marginBottom: 12 }}>If this order needs to align with an existing contract end date, enter both dates to auto-calculate proration.</p>
+              <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 12 }}>If this order needs to align with an existing contract end date, enter both dates to auto-calculate proration.</p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div>
                   <label style={labelStyle}>New Service Start Date</label>
@@ -905,34 +773,33 @@ export default function SafetyIQOrderForm() {
                 </div>
               </div>
               {proration && (
-                <div style={{ marginTop: 16, padding: 14, borderRadius: 10, background: accent + "12", border: `1px solid ${accent}` }}>
-                  <div style={{ fontSize: 13, color: accent, fontWeight: 600 }}>Proration Applied</div>
-                  <div style={{ fontSize: 12, color: textSecondary, marginTop: 4 }}>
-                    {proration.days} days → Year 1 prorated to <strong style={{ color: textPrimary }}>{fmt(proration.proratedYear1)}</strong> ({Math.round(proration.fraction * 100)}% of annual)
+                <div style={{ marginTop: 16, padding: 14, borderRadius: 10, background: T.accent + "12", border: `1px solid ${T.accent}` }}>
+                  <div style={{ fontSize: 13, color: T.accent, fontWeight: 600 }}>Proration Applied</div>
+                  <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>
+                    {proration.days} days → Year 1 prorated to <strong style={{ color: T.textPrimary }}>{fmt(proration.proratedYear1)}</strong> ({Math.round(proration.fraction * 100)}% of annual)
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Payment schedule */}
             <div style={cardStyle}>
               <div style={sectionTitle}>Payment Schedule</div>
-              <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${cardBorder}` }}>
+              <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${T.cardBorder}` }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", background: "#0a1020", padding: "10px 14px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: textSecondary }}>PERIOD</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: textSecondary, textAlign: "right" }}>AMOUNT</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: textSecondary, textAlign: "right" }}>NOTE</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary }}>PERIOD</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary, textAlign: "right" }}>AMOUNT</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary, textAlign: "right" }}>NOTE</div>
                 </div>
                 {buildPaymentSchedule().map((row, i) => (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${cardBorder}`, background: i % 2 === 0 ? "transparent" : "#0a0f1a" }}>
-                    <div style={{ fontSize: 13, color: textPrimary, fontWeight: 600 }}>{row.year}</div>
-                    <div style={{ fontSize: 13, color: green, fontWeight: 700, textAlign: "right" }}>{fmt(row.amount)}</div>
-                    <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{row.note}</div>
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${T.cardBorder}`, background: i % 2 === 0 ? "transparent" : "#0a0f1a" }}>
+                    <div style={{ fontSize: 13, color: T.textPrimary, fontWeight: 600 }}>{row.year}</div>
+                    <div style={{ fontSize: 13, color: T.green, fontWeight: 700, textAlign: "right" }}>{fmt(row.amount)}</div>
+                    <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{row.note}</div>
                   </div>
                 ))}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "12px 14px", borderTop: `2px solid ${green}`, background: green + "08" }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: textPrimary }}>Total Contract Value</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: green, textAlign: "right" }}>{fmt(totalContractValue)}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "12px 14px", borderTop: `2px solid ${T.green}`, background: T.green + "08" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary }}>Total Contract Value</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: T.green, textAlign: "right" }}>{fmt(totalContractValue)}</div>
                   <div />
                 </div>
               </div>
@@ -951,67 +818,43 @@ export default function SafetyIQOrderForm() {
             <div style={cardStyle}>
               <div style={sectionTitle}>Company Information</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {[
-                  ["company", "Company Name"], ["employees", "# of Employees"],
-                  ["address", "Street Address"], ["city", "City"],
-                  ["state", "State"], ["zip", "ZIP Code"],
-                ].map(([k, l]) => (
-                  <div key={k}>
-                    <label style={labelStyle}>{l}</label>
-                    <input value={customer[k]} onChange={e => setCustomer(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} />
-                  </div>
+                {[["company", "Company Name"], ["employees", "# of Employees"], ["address", "Street Address"], ["city", "City"], ["state", "State"], ["zip", "ZIP Code"]].map(([k, l]) => (
+                  <div key={k}><label style={labelStyle}>{l}</label><input value={customer[k]} onChange={e => setCustomer(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} /></div>
                 ))}
               </div>
             </div>
-
             <div style={cardStyle}>
               <div style={sectionTitle}>Primary Contact</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {[
-                  ["contactName", "Name"], ["contactTitle", "Title"],
-                  ["contactEmail", "Email"], ["contactPhone", "Phone"],
-                ].map(([k, l]) => (
-                  <div key={k}>
-                    <label style={labelStyle}>{l}</label>
-                    <input value={customer[k]} onChange={e => setCustomer(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} />
-                  </div>
+                {[["contactName", "Name"], ["contactTitle", "Title"], ["contactEmail", "Email"], ["contactPhone", "Phone"]].map(([k, l]) => (
+                  <div key={k}><label style={labelStyle}>{l}</label><input value={customer[k]} onChange={e => setCustomer(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} /></div>
                 ))}
               </div>
             </div>
-
             <div style={cardStyle}>
               <div style={sectionTitle}>Billing Contact</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                {[
-                  ["billingName", "Name"], ["billingEmail", "Email"], ["billingPhone", "Phone"],
-                ].map(([k, l]) => (
-                  <div key={k}>
-                    <label style={labelStyle}>{l}</label>
-                    <input value={customer[k]} onChange={e => setCustomer(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} />
-                  </div>
+                {[["billingName", "Name"], ["billingEmail", "Email"], ["billingPhone", "Phone"]].map(([k, l]) => (
+                  <div key={k}><label style={labelStyle}>{l}</label><input value={customer[k]} onChange={e => setCustomer(prev => ({ ...prev, [k]: e.target.value }))} style={inputStyle} /></div>
                 ))}
               </div>
             </div>
-
             <div style={cardStyle}>
               <div style={sectionTitle}>Notes</div>
               <textarea value={customer.notes} onChange={e => setCustomer(prev => ({ ...prev, notes: e.target.value }))} rows={4} style={{ ...inputStyle, resize: "vertical" }} placeholder="Additional notes, special terms, etc." />
             </div>
-
-            {/* Logo upload for Word doc */}
             <div style={cardStyle}>
               <div style={sectionTitle}>SafetyIQ Logo (for Word Document)</div>
-              <p style={{ fontSize: 12, color: textSecondary, marginBottom: 8 }}>Upload the SafetyIQ logo to include in the generated Word document header.</p>
-              <input ref={logoInputRef} type="file" accept="image/*" onChange={(e) => {
+              <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 8 }}>Upload the SafetyIQ logo to include in the generated Word document header (right-aligned, 387×100px at 96 DPI).</p>
+              <input type="file" accept="image/*" onChange={(e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = (ev) => setLogoData(ev.target.result);
                 reader.readAsDataURL(file);
-              }} style={{ fontSize: 13, color: textSecondary }} />
-              {logoData && <div style={{ marginTop: 8, fontSize: 12, color: green }}>✓ Logo loaded</div>}
+              }} style={{ fontSize: 13, color: T.textSecondary }} />
+              {logoData && <div style={{ marginTop: 8, fontSize: 12, color: T.green }}>✓ Logo loaded</div>}
             </div>
-
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <button onClick={() => goStep(2)} style={btnSecondary}>← Back</button>
               <button onClick={() => goStep(4)} style={btnPrimary}>Next: Review →</button>
@@ -1024,166 +867,147 @@ export default function SafetyIQOrderForm() {
           <div>
             <div style={cardStyle}>
               <div style={sectionTitle}>Order Summary</div>
-
-              {/* Customer summary */}
               <div style={{ padding: 14, borderRadius: 10, background: "#0a1020", marginBottom: 16 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: textPrimary }}>{customer.company || "Company Name"}</div>
-                <div style={{ fontSize: 12, color: textSecondary }}>{customer.contactName} · {customer.contactEmail}</div>
-                <div style={{ fontSize: 12, color: textSecondary }}>{EMPLOYEE_TIERS.find(t => t.id === tier)?.range} · {contractTerm}-month term</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: T.textPrimary }}>{customer.company || "Company Name"}</div>
+                <div style={{ fontSize: 12, color: T.textSecondary }}>{customer.contactName} · {customer.contactEmail}</div>
+                <div style={{ fontSize: 12, color: T.textSecondary }}>{EMPLOYEE_TIERS.find(t => t.id === tier)?.range} · {contractTerm}-month term</div>
               </div>
 
-              {/* Line items */}
-              <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${cardBorder}` }}>
+              <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${T.cardBorder}` }}>
                 <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", background: "#0a1020", padding: "10px 14px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: textSecondary }}>ITEM</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: textSecondary, textAlign: "right" }}>ANNUAL</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: textSecondary, textAlign: "right" }}>MONTHLY</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary }}>ITEM</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary, textAlign: "right" }}>ANNUAL</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary, textAlign: "right" }}>MONTHLY</div>
                 </div>
 
-                {/* SI */}
-                {(siMode === "package" || siMode === "addon") && (
+                {(siMode === "package" || siMode === "addon") && pkg && (
                   <>
-                    <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${cardBorder}` }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>Safety Indicators — {pkg.label}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: green, textAlign: "right" }}>{fmt(Math.round(pkgPrice * (1 - (lineDiscounts[selectedPackage] || 0) / 100)))}</div>
-                      <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(Math.round(pkgPrice * (1 - (lineDiscounts[selectedPackage] || 0) / 100)))}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${T.cardBorder}` }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>Safety Indicators — {pkg.label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.green, textAlign: "right" }}>{fmt(Math.round(pkgPrice * (1 - (lineDiscounts[selectedPackage] || 0) / 100)))}</div>
+                      <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(Math.round(pkgPrice * (1 - (lineDiscounts[selectedPackage] || 0) / 100)))}</div>
                     </div>
                     {SI_MODULES.filter(m => selectedModules[m.id] && !getActivePackageModules().includes(m.id)).map(m => {
-                      const p = m.prices[tier] || 0;
-                      const d = lineDiscounts[m.id] || 0;
-                      const f = Math.round(p * (1 - d / 100));
+                      const f = Math.round((m.prices[tier] || 0) * (1 - (lineDiscounts[m.id] || 0) / 100));
                       return (
-                        <div key={m.id} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px 8px 28px", borderTop: `1px solid ${cardBorder}`, background: "#0a0f1a" }}>
-                          <div style={{ fontSize: 12, color: textSecondary }}>+ {m.name}</div>
-                          <div style={{ fontSize: 12, color: textPrimary, textAlign: "right" }}>{fmt(f)}</div>
-                          <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
+                        <div key={m.id} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px 8px 28px", borderTop: `1px solid ${T.cardBorder}`, background: "#0a0f1a" }}>
+                          <div style={{ fontSize: 12, color: T.textSecondary }}>+ {m.name}</div>
+                          <div style={{ fontSize: 12, color: T.textPrimary, textAlign: "right" }}>{fmt(f)}</div>
+                          <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
                         </div>
                       );
                     })}
                   </>
                 )}
-
-                {siMode === "alacarte" && (
+                {siMode === "alacarte" && Object.values(selectedModules).some(Boolean) && (
                   <>
-                    <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${cardBorder}` }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>SI Base Platform Fee</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: green, textAlign: "right" }}>{fmt(BASE_PLATFORM_FEE[tier])}</div>
-                      <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(BASE_PLATFORM_FEE[tier])}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${T.cardBorder}` }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>SI Base Platform Fee</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.green, textAlign: "right" }}>{fmt(BASE_PLATFORM_FEE[tier])}</div>
+                      <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(BASE_PLATFORM_FEE[tier])}</div>
                     </div>
                     {SI_MODULES.filter(m => selectedModules[m.id]).map(m => {
-                      const p = m.prices[tier] || 0;
-                      const d = lineDiscounts[m.id] || 0;
-                      const f = Math.round(p * (1 - d / 100));
+                      const f = Math.round((m.prices[tier] || 0) * (1 - (lineDiscounts[m.id] || 0) / 100));
                       return (
-                        <div key={m.id} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${cardBorder}` }}>
-                          <div style={{ fontSize: 12, color: textPrimary }}>{m.name}</div>
-                          <div style={{ fontSize: 12, color: textPrimary, textAlign: "right" }}>{fmt(f)}</div>
-                          <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
+                        <div key={m.id} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${T.cardBorder}` }}>
+                          <div style={{ fontSize: 12, color: T.textPrimary }}>{m.name}</div>
+                          <div style={{ fontSize: 12, color: T.textPrimary, textAlign: "right" }}>{fmt(f)}</div>
+                          <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
                         </div>
                       );
                     })}
                   </>
                 )}
 
-                {/* SI Custom */}
                 {customItems.si.filter(ci => ci.name).map(ci => {
-                  const d = lineDiscounts[ci.uid] || 0;
-                  const f = Math.round(ci.price * (1 - d / 100));
+                  const f = Math.round(ci.price * (1 - (lineDiscounts[ci.uid] || 0) / 100));
                   return (
-                    <div key={ci.uid} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${cardBorder}`, background: "#0a0f1a" }}>
-                      <div style={{ fontSize: 12, color: textSecondary }}>{ci.name}</div>
-                      <div style={{ fontSize: 12, color: textPrimary, textAlign: "right" }}>{fmt(f)}</div>
-                      <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
+                    <div key={ci.uid} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${T.cardBorder}`, background: "#0a0f1a" }}>
+                      <div style={{ fontSize: 12, color: T.textSecondary }}>{ci.name}</div>
+                      <div style={{ fontSize: 12, color: T.textPrimary, textAlign: "right" }}>{fmt(f)}</div>
+                      <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
                     </div>
                   );
                 })}
 
-                {/* DRUID */}
                 {druidEnabled && (
                   <>
-                    <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `2px solid ${cardBorder}` }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>DRUID ({druidUsers} users @ ${getDruidTier(druidUsers).pricePerUserMonth}/user/mo)</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: green, textAlign: "right" }}>{fmt(calcDRUIDTotal())}</div>
-                      <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(calcDRUIDTotal())}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `2px solid ${T.cardBorder}` }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>DRUID ({druidUsers} users @ ${getDruidTier(druidUsers).pricePerUserMonth}/user/mo)</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.green, textAlign: "right" }}>{fmt(calcDRUIDTotal())}</div>
+                      <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(calcDRUIDTotal())}</div>
                     </div>
                     {customItems.druid.filter(ci => ci.name).map(ci => {
-                      const d = lineDiscounts[ci.uid] || 0;
-                      const f = Math.round(ci.price * (1 - d / 100));
+                      const f = Math.round(ci.price * (1 - (lineDiscounts[ci.uid] || 0) / 100));
                       return (
-                        <div key={ci.uid} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${cardBorder}`, background: "#0a0f1a" }}>
-                          <div style={{ fontSize: 12, color: textSecondary }}>{ci.name}</div>
-                          <div style={{ fontSize: 12, color: textPrimary, textAlign: "right" }}>{fmt(f)}</div>
-                          <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
+                        <div key={ci.uid} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${T.cardBorder}`, background: "#0a0f1a" }}>
+                          <div style={{ fontSize: 12, color: T.textSecondary }}>{ci.name}</div>
+                          <div style={{ fontSize: 12, color: T.textPrimary, textAlign: "right" }}>{fmt(f)}</div>
+                          <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
                         </div>
                       );
                     })}
                   </>
                 )}
 
-                {/* JESI */}
                 {JESI_ITEMS.filter(item => jesiSelections[item.id]).map(item => {
-                  const d = lineDiscounts[item.id] || 0;
-                  const p = item.prices[tier] || 0;
-                  const f = Math.round(p * (1 - d / 100));
+                  const f = Math.round((item.prices[tier] || 0) * (1 - (lineDiscounts[item.id] || 0) / 100));
                   return (
-                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${cardBorder}` }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: textPrimary }}>{item.name}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: green, textAlign: "right" }}>{fmt(f)}</div>
-                      <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
+                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "10px 14px", borderTop: `1px solid ${T.cardBorder}` }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>{item.name}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.green, textAlign: "right" }}>{fmt(f)}</div>
+                      <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
                     </div>
                   );
                 })}
                 {customItems.jesi.filter(ci => ci.name).map(ci => {
-                  const d = lineDiscounts[ci.uid] || 0;
-                  const f = Math.round(ci.price * (1 - d / 100));
+                  const f = Math.round(ci.price * (1 - (lineDiscounts[ci.uid] || 0) / 100));
                   return (
-                    <div key={ci.uid} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${cardBorder}`, background: "#0a0f1a" }}>
-                      <div style={{ fontSize: 12, color: textSecondary }}>{ci.name}</div>
-                      <div style={{ fontSize: 12, color: textPrimary, textAlign: "right" }}>{fmt(f)}</div>
-                      <div style={{ fontSize: 12, color: textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
+                    <div key={ci.uid} style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "8px 14px", borderTop: `1px solid ${T.cardBorder}`, background: "#0a0f1a" }}>
+                      <div style={{ fontSize: 12, color: T.textSecondary }}>{ci.name}</div>
+                      <div style={{ fontSize: 12, color: T.textPrimary, textAlign: "right" }}>{fmt(f)}</div>
+                      <div style={{ fontSize: 12, color: T.textSecondary, textAlign: "right" }}>{fmtM(f)}</div>
                     </div>
                   );
                 })}
 
-                {/* Totals */}
-                <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "14px", borderTop: `2px solid ${green}`, background: green + "08" }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: textPrimary }}>Annual Total</div>
-                  <div style={{ fontSize: 17, fontWeight: 800, color: green, textAlign: "right" }}>{fmt(annualTotal)}</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: textSecondary, textAlign: "right" }}>{fmtM(annualTotal)}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr 1fr", padding: "14px", borderTop: `2px solid ${T.green}`, background: T.green + "08" }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: T.textPrimary }}>Annual Total</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: T.green, textAlign: "right" }}>{fmt(annualTotal)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.textSecondary, textAlign: "right" }}>{fmtM(annualTotal)}</div>
                 </div>
               </div>
 
-              {/* Payment schedule mini */}
               <div style={{ marginTop: 16, padding: 14, borderRadius: 10, background: "#0a1020" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: textSecondary, marginBottom: 8 }}>Payment Schedule ({contractTerm}mo term, {escalator}% escalator)</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.textSecondary, marginBottom: 8 }}>Payment Schedule ({contractTerm}mo term, {escalator}% escalator)</div>
                 {buildPaymentSchedule().map((row, i) => (
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13 }}>
-                    <span style={{ color: textPrimary }}>{row.year}</span>
-                    <span style={{ color: green, fontWeight: 600 }}>{fmt(row.amount)} {row.note && <span style={{ color: textSecondary, fontSize: 11 }}>({row.note})</span>}</span>
+                    <span style={{ color: T.textPrimary }}>{row.year}</span>
+                    <span style={{ color: T.green, fontWeight: 600 }}>{fmt(row.amount)} {row.note && <span style={{ color: T.textSecondary, fontSize: 11 }}>({row.note})</span>}</span>
                   </div>
                 ))}
-                <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 8, marginTop: 8, borderTop: `1px solid ${cardBorder}`, fontSize: 14, fontWeight: 700 }}>
-                  <span style={{ color: textPrimary }}>Total Contract Value</span>
-                  <span style={{ color: green }}>{fmt(totalContractValue)}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 8, marginTop: 8, borderTop: `1px solid ${T.cardBorder}`, fontSize: 14, fontWeight: 700 }}>
+                  <span style={{ color: T.textPrimary }}>Total Contract Value</span>
+                  <span style={{ color: T.green }}>{fmt(totalContractValue)}</span>
                 </div>
               </div>
 
               {customer.notes && (
                 <div style={{ marginTop: 16, padding: 14, borderRadius: 10, background: "#0a1020" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: textSecondary, marginBottom: 4 }}>Notes</div>
-                  <div style={{ fontSize: 13, color: textPrimary }}>{customer.notes}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: T.textSecondary, marginBottom: 4 }}>Notes</div>
+                  <div style={{ fontSize: 13, color: T.textPrimary }}>{customer.notes}</div>
                 </div>
               )}
 
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
                 <button onClick={() => goStep(3)} style={btnSecondary}>← Back</button>
                 <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={generateDocx} disabled={generating} style={{ ...btnSecondary, borderColor: accent, color: accent, opacity: generating ? 0.6 : 1 }}><DocIcon /> {generating ? "Generating..." : "Generate Word Doc"}</button>
-                  <button onClick={handleSubmit} style={btnPrimary} onMouseEnter={e => e.target.style.transform = "scale(1.03)"} onMouseLeave={e => e.target.style.transform = "scale(1)"}>Submit Order</button>
+                  <button onClick={generateDocx} disabled={generating} style={{ ...btnSecondary, borderColor: T.accent, color: T.accent, opacity: generating ? 0.6 : 1 }}><DocIcon /> {generating ? "Generating..." : "Generate Word Doc"}</button>
+                  <button onClick={() => goStep(5)} style={btnPrimary}>Submit Order</button>
                 </div>
               </div>
             </div>
-            <p style={{ textAlign: "center", fontSize: 12, color: textMuted, marginTop: 16 }}>By submitting, you authorize SafetyIQ, Inc. to prepare a formal agreement. Final pricing subject to executed contract.</p>
+            <p style={{ textAlign: "center", fontSize: 12, color: T.textMuted, marginTop: 16 }}>By submitting, you authorize SafetyIQ, Inc. to prepare a formal agreement. Final pricing subject to executed contract.</p>
           </div>
         )}
 
@@ -1191,17 +1015,17 @@ export default function SafetyIQOrderForm() {
         {step === 5 && (
           <div style={{ ...cardStyle, textAlign: "center", padding: 48 }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: textPrimary, marginBottom: 8 }}>Order Submitted</div>
-            <div style={{ fontSize: 14, color: textSecondary, marginBottom: 24 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: T.textPrimary, marginBottom: 8 }}>Order Submitted</div>
+            <div style={{ fontSize: 14, color: T.textSecondary, marginBottom: 24 }}>
               {customer.company ? `Order for ${customer.company} has been recorded.` : "Order has been recorded."} A member of the SafetyIQ team will be in touch.
             </div>
-            <div style={{ fontSize: 13, color: textSecondary }}>Contact: ryan.pollard@safetyiq.com</div>
-            <button onClick={() => { goStep(1); }} style={{ ...btnSecondary, marginTop: 24 }}>Start New Order</button>
+            <div style={{ fontSize: 13, color: T.textSecondary }}>Contact: ryan.pollard@safetyiq.com</div>
+            <button onClick={() => goStep(1)} style={{ ...btnSecondary, marginTop: 24 }}>Start New Order</button>
           </div>
         )}
 
-        <div style={{ textAlign: "center", marginTop: 44, paddingTop: 20, borderTop: `1px solid #141e35` }}>
-          <p style={{ fontSize: 12, color: textMuted, margin: 0 }}>© {new Date().getFullYear()} SafetyIQ, Inc. · Confidential</p>
+        <div style={{ textAlign: "center", marginTop: 44, paddingTop: 20, borderTop: "1px solid #141e35" }}>
+          <p style={{ fontSize: 12, color: T.textMuted, margin: 0 }}>© {new Date().getFullYear()} SafetyIQ, Inc. · Confidential</p>
         </div>
       </div>
     </div>
