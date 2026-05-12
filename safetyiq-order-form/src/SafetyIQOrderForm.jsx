@@ -595,6 +595,40 @@ export default function SafetyIQOrderForm() {
                 </div>
               )}
 
+              {/* Package module customizer — swap modules in/out */}
+              {(siMode === "package" || siMode === "addon") && selectedPackage && pkg && (
+                <div style={{ marginBottom: 16, background: "rgba(20,30,55,0.5)", borderRadius: 10, padding: "14px 18px", border: `1px solid ${T.cardBorder}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <span style={{ fontSize: 13, color: T.textSecondary }}>📝 Customize which modules are included in this package for this customer:</span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {SI_MODULES.map(mod => {
+                      const included = getActivePackageModules().includes(mod.id);
+                      return (
+                        <div key={mod.id} onClick={() => {
+                          setPackageModuleOverrides(prev => {
+                            const cur = { ...(prev[selectedPackage] || {}) };
+                            const isDefault = pkg.defaultModules.includes(mod.id);
+                            if (included) {
+                              cur[mod.id] = false;
+                            } else {
+                              cur[mod.id] = true;
+                            }
+                            // Clean up if it matches default
+                            if ((isDefault && cur[mod.id] === true) || (!isDefault && cur[mod.id] === false)) {
+                              delete cur[mod.id];
+                            }
+                            return { ...prev, [selectedPackage]: cur };
+                          });
+                        }} style={{ padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, background: included ? T.accent + "18" : "rgba(20,30,55,0.8)", border: `1px solid ${included ? T.accent + "60" : T.cardBorder}`, color: included ? "#8eb8ff" : T.textMuted, transition: "all 0.2s" }}>
+                          {included ? "✓ " : ""}{mod.name}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {siMode === "addon" && (
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: T.textSecondary, marginBottom: 8 }}>Add-On Modules</div>
